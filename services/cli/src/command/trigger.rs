@@ -1,11 +1,12 @@
 use anyhow::Result;
 use proto::api::function_runner_service_client::FunctionRunnerServiceClient;
 
-pub async fn run(name: String) -> Result<()> {
+pub async fn run(name: String, body: String) -> Result<()> {
+    println!("Sending to {}", name);
     let mut client = FunctionRunnerServiceClient::connect("http://[::1]:54036").await?;
 
     let request = tonic::Request::new(proto::api::InvokeRequest {
-        payload: Some("{\"name\":\"".to_string() + &name + "\"}")
+        payload: Some(body)
     });
 
     let response = client.invoke(request).await?;

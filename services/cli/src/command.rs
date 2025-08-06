@@ -8,9 +8,12 @@ mod trigger;
 pub enum Command {
     Trigger {
         name: String,
+
+        #[arg(short, long)]
+        body: String,
     },
     Run {
-        path: String
+        path: String,
     },
 }
 
@@ -31,8 +34,8 @@ struct Cli {
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Trigger { name } => {
-            trigger::run(name).await?
+        Command::Trigger { name, body } => {
+            trigger::run(name, body).await?
         }
         Command::Run { path } => {
             run::run(path).await?;
