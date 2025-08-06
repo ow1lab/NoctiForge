@@ -2,7 +2,7 @@
 name = "echo"
 type = "Custom"
 
-[build]
+[build.Custom]
 command = "cargo build --release"
 output = "./target/release/echo"
 
