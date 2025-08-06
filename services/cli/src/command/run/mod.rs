@@ -1,4 +1,5 @@
 use anyhow::Result;
+use anyhow::*;
 use serde::Deserialize;
 use std::fs::read_to_string;
 use std::io::{
@@ -7,6 +8,8 @@ use std::io::{
 };
 
 mod custom;
+
+
 
 #[derive(Debug, Deserialize)]
 struct NoctiConfig {
@@ -17,12 +20,20 @@ struct NoctiConfig {
 #[derive(Debug, Deserialize)]
 struct Project {
     name: String,
+    #[serde(rename = "type")]
+    project_type: ProjectType,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(untagged)]
+enum ProjectType {
+    Custom,
+    None,
+}
+
+#[derive(Debug, Deserialize)]
 enum RunType {
     Custom(custom::CustomRun),
+    None,
 }
 
 pub async fn run(path: String) -> Result<()> {
@@ -48,10 +59,14 @@ pub async fn run(path: String) -> Result<()> {
 
     println!("Project Name: {}", cfg.project.name);
 
-    match cfg.run {
-        RunType::Custom(custom) => {
-            custom::process(custom, &path).await?;
-        }
+    match cfg.project.project_type {
+        ProjectType::Custom => {
+            let RunType::Custom(run_cfg) = cfg.run else {
+                bail!("Expected RunType::Custom for ProjectType::Custom");
+            };
+            custom::process(run_cfg, &path).await?;
+        },
+        _ => bail!("Unexpected type")
     }
 
     return Ok(())

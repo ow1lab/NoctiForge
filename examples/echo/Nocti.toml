@@ -1,11 +1,11 @@
 [project]
 name = "echo"
-type = "custom"
+type = "Custom"
 
 [build]
 command = "cargo build --release"
-output = "target/release/echo"
+output = "./target/release/echo"
 
-[run]
+[run.Custom]
 command = "cargo build"
-output = "target/dev/echo"
+output = "./target/debug/echo"
