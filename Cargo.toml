@@ -1,3 +1,8 @@
 [workspace]
-members = ["proto", "cli", "examples/echo", "sdk"]
+members = [
+  "examples/echo",
+  "libs/proto",
+  "libs/sdk",
+  "services/cli",
+]
 resolver = "2"
