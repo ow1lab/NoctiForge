@@ -1,3 +1,8 @@
 pub mod api {
-    tonic::include_proto!("noctifunc.action");
+    pub mod action {
+        tonic::include_proto!("noctifunc.action");
+    }
+    pub mod registry {
+        tonic::include_proto!("noctifunc.registry");
+    }
 }

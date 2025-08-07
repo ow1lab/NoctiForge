@@ -1,4 +1,4 @@
-use proto::api::{function_runner_service_server::{FunctionRunnerService, FunctionRunnerServiceServer}, InvokeRequest, InvokeResult};
+use proto::api::action::{function_runner_service_server::{FunctionRunnerService, FunctionRunnerServiceServer}, InvokeRequest, InvokeResult};
 use tonic::{Response};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{future::Future, marker::PhantomData, net::SocketAddr};

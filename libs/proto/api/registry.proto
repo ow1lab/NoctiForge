@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package noctifunc.registry;
+
+option go_package = "github.com/Ow1Dev/noctifunc/pkg/api/server";
+
+service RegistryService {
+  rpc Pull(RegistryPullRequest) returns (stream RegistryPullResponse);
+  rpc Push(stream RegistryPushRequest) returns (RegistryPushResponse);
+}
+
+message RegistryPullRequest {
+  string digest = 1;
+}
+
+message RegistryPullResponse {
+  bytes data = 1;
+  bytes signature = 2;
+  string digest = 3;
+}
+
+message RegistryPushRequest {
+  bytes data = 1;
+} 
+message RegistryPushResponse {}
