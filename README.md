@@ -5,6 +5,16 @@
 Just write a handler. NoctiForge handles the rest.
 
 ---
+
+## Development
+### Prerequisites
+Ensure you have the following installed:
+- Cargo (Version 1.86.0)
+
+Initialize the required folders and files:
+```sh
+./scripts/setup.sh
+```
  
 ## Architecture
 ![noctiforge infra](./assert/InfraDiagram.svg)
