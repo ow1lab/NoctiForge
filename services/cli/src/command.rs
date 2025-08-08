@@ -38,7 +38,7 @@ pub async fn run() -> Result<()> {
             trigger::run(name, body).await?
         }
         Command::Push { path } => {
-            push::run(path).await?;
+            push::run(&path).await?;
         }
     }
 

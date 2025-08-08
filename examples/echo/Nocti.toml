@@ -1,8 +1,9 @@
 [project]
 name="echo"
+version="0.1.0"
 
 [build]
-type="custom"
+type = "custom"
 script="""
 cargo build --release --target x86_64-unknown-linux-musl
 mkdir temp

@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { version = "1" }
+async_zip = { features = ["deflate", "tokio"], version = "0" }
 clap = { version = "4", features = ["derive"] }
 proto = { path = "../../libs/proto" }
 serde = { version = "1", features = ["derive"] }
