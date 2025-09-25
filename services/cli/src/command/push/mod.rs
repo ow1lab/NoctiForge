@@ -1,25 +1,29 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 use custom::CustomBuild;
 use rust::RustBuild;
 use serde::Deserialize;
+use tonic::async_trait;
 
 mod custom;
 mod rust;
 
 const CONFIG_FILE: &str = "Nocti.toml";
 
+#[async_trait]
 trait BuildService {
-    fn build(&self) -> Result<String>;
+    async fn build(&self, project_path: PathBuf) -> Result<String>;
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct Project {
     name: String,
     version: String,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize)]
 struct Config {
     project: Project,
@@ -51,16 +55,17 @@ pub async fn run(path: &str) -> Result<()> {
     let config: Config = toml::from_str(&config_content)?; 
 
     // Run the scripts
-    let buildservice: Box<dyn BuildService> = match config.build {
+    let buildservice: Box<dyn BuildService + Send + Sync> = match config.build {
         Build::Custom( cb ) => Box::new(cb),
         Build::Rust( rb ) => Box::new(rb),
     };
 
-    let path = buildservice.build()?;
+    let path = buildservice.build(project_path.to_path_buf()).await?;
+    println!("{:?}", path);
 
     // zip It
-    let zip_builder = async_zip::ZipFileBuilder::new();
-
+    // let file = File::create("needname.tar").await?;
+    // let mut a = Builder::new(file);
 
     // push to registry
     Ok(())

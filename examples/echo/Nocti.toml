@@ -5,8 +5,10 @@ version="0.1.0"
 [build]
 type = "custom"
 script="""
+set -e
 cargo build --release --target x86_64-unknown-linux-musl
-mkdir temp
+mkdir -p temp
+rm -rf temp/*
 cp target/x86_64-unknown-linux-musl/release/echo ./temp/bootstrap
 """
 output="temp"
