@@ -1,4 +1,4 @@
-use std::pin::Pin;
+use std::{io::Cursor, pin::Pin};
 
 use proto::api::registry::{
     registry_service_server::RegistryService,
@@ -7,9 +7,10 @@ use proto::api::registry::{
     RegistryPushRequest,
     RegistryPushResponse,
 };
-use sha256::digest;
-use tokio::fs::write;
+use sha2::{Digest, Sha256};
+use tokio::{fs::write, io::AsyncReadExt};
 use tokio_stream::{Stream, StreamExt};
+use tokio_tar::Archive;
 use tonic::{
     Request,
     Streaming,
@@ -51,7 +52,16 @@ impl RegistryService for LocalBackend {
             return Err(Status::invalid_argument("missing `data` field"));
         }
 
-        let digest = digest(request_data.clone());
+        let cursor = Cursor::new(&request_data);
+        let mut archive = Archive::new(cursor);
+        if let Err(err) = archive.entries() {
+            return Err(Status::invalid_argument(format!(
+                "invalid tar archive: {}",
+                err
+            )));
+        }
+
+        let digest = get_digist(archive).await?; 
         let request_path = get_registry_path(&digest);
 
         if !request_path.exists() {
@@ -62,4 +72,31 @@ impl RegistryService for LocalBackend {
 
         Ok(Response::new(RegistryPushResponse { digest: digest }))
     }
+}
+
+async fn get_digist<T: std::marker::Unpin + tokio::io::AsyncRead>(mut archive: Archive<T>) -> Result<String>
+{
+    let mut hasher = Sha256::new();
+
+    let mut entries = archive.entries()?;
+    while let Some(file) = entries.next().await {
+        let mut entry = file?;
+        let path = entry
+            .path()?
+            .to_string_lossy()
+            .to_string();
+
+        if entry.header().entry_type().is_file() {
+            let mut buf = Vec::new();
+            entry.read_to_end(&mut buf).await?;
+            hasher.update(b"file:");        // prefix to differentiate files/folders
+            hasher.update(path.as_bytes());
+            hasher.update(&buf);
+        } else if entry.header().entry_type().is_dir() {
+            hasher.update(b"dir:");         // prefix for directories
+            hasher.update(path.as_bytes());
+        }
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
 }

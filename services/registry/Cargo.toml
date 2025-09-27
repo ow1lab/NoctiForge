@@ -5,7 +5,8 @@ edition = "2024"
 
 [dependencies]
 proto = { path = "../../libs/proto" }
-sha256 = { version = "1" }
+sha2 = { version = "0.10" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process"] }
 tokio-stream = { features = ["io-util"], version = "0" }
+tokio-tar = "0"
 tonic = "0"
