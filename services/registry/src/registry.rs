@@ -39,8 +39,6 @@ impl RegistryService for LocalBackend {
 
     async fn push(&self, request: Request<Streaming<RegistryPushRequest>>,
     ) -> Result<Response<RegistryPushResponse>, Status> {
-        println!("incomming connection");
-
         let mut request_data: Vec<u8> = vec![];
         let mut request_stream = request.into_inner();
 
