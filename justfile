@@ -4,3 +4,4 @@ default:
 
 update:
     nix flake update
+    cargo update

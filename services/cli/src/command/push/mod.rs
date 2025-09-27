@@ -4,6 +4,8 @@ use anyhow::{bail, Result};
 use custom::CustomBuild;
 use rust::RustBuild;
 use serde::Deserialize;
+use tokio::fs::File;
+use tokio_tar::Builder;
 use tonic::async_trait;
 
 mod custom;
@@ -61,11 +63,16 @@ pub async fn run(path: &str) -> Result<()> {
     };
 
     let path = buildservice.build(project_path.to_path_buf()).await?;
-    println!("{:?}", path);
+    let bin_folder = project_path.join(path);
+
+    println!("bin_folder: {:?}", bin_folder);
 
     // zip It
-    // let file = File::create("needname.tar").await?;
-    // let mut a = Builder::new(file);
+    let file = File::create("needname.tar").await?;
+    let mut a = Builder::new(file);
+
+    a.append_dir_all(".", bin_folder).await?;
+    a.finish().await?;
 
     // push to registry
     Ok(())
