@@ -3,21 +3,26 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, rust-overlay }:
     let
       system = "x86_64-linux";
-      pkgs = import nixpkgs { inherit system; };
+      overlays = [ (import rust-overlay) ];
+      pkgs = import nixpkgs { inherit system overlays; };
     in {
       devShells.${system}.default = pkgs.mkShell {
         buildInputs = with pkgs; [
           protobuf
-          rustup
+          just
           rust-analyzer
           rustfmt
-          just
-          pkgsCross.musl64.buildPackages.stdenv
+
+          # Rust with both musl + gnu targets
+          (pkgs.rust-bin.stable.latest.default.override {
+            targets = [ "x86_64-unknown-linux-musl" "x86_64-unknown-linux-gnu" ];
+          })
         ];
       };
     };
