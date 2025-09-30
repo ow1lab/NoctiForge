@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 use custom::CustomBuild;
-use proto::api::{controlplane::{control_plane_service_client::ControlPlaneServiceClient, GetDigestByNameRequest, SetDigestToNameRequest}, registry::{self, RegistryPushRequest}};
+use proto::api::{controlplane::{control_plane_service_client::ControlPlaneServiceClient, SetDigestToNameRequest}, registry::{self, RegistryPushRequest}};
 use rust::RustBuild;
 use serde::Deserialize;
 use tokio::io::{duplex, AsyncReadExt};
