@@ -8,4 +8,7 @@ pub mod api {
     pub mod controlplane {
         tonic::include_proto!("noctiforge.controlplane");
     }
+    pub mod worker {
+        tonic::include_proto!("noctiforge.worker");
+    }
 }

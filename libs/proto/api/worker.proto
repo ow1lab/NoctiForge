@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package noctiforge.worker;
+
+service WorkerService {
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+}
+
+message ExecuteRequest {
+  string action = 1;
+  string body = 2;
+}
+
+message ExecuteResponse {
+  string status = 1;
+  string resp = 2;
+}
