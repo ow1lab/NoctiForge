@@ -9,6 +9,7 @@ use tokio::io::{duplex, AsyncReadExt};
 use tokio_tar::Builder;
 use tonic::{async_trait, Request};
 use registry::registry_service_client::RegistryServiceClient;
+use tracing::{info, error, debug};
 
 mod custom;
 mod rust;
@@ -28,13 +29,13 @@ struct Project {
 }
 
 #[allow(dead_code)]
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct Config {
     project: Project,
     build: Build,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 #[serde(tag = "type")]
 enum Build {
     #[serde(rename = "custom")]
@@ -46,41 +47,54 @@ enum Build {
 
 pub async fn run(path: &str) -> Result<()> {
     let project_path = Path::new(path);
+    info!("Running push command on path: {:?}", project_path);
+
     if !project_path.is_dir() || !project_path.exists() {
+        error!("Provided path is invalid: {:?}", project_path);
         bail!("'path' does not exist or its a not folder");
     }
 
     let config_file_path = project_path.join(CONFIG_FILE);
     if !config_file_path.is_file() || !config_file_path.exists() {
+        error!("Missing config file at: {:?}", config_file_path);
         bail!("'{}' does not exist or its a folder", CONFIG_FILE);
     }
 
+    info!("Loading project config from: {:?}", config_file_path);
     let config_content = std::fs::read_to_string(config_file_path)?;
     let config: Config = toml::from_str(&config_content)?; 
+    debug!("Parsed config: {:?}", config);
 
     // Run the scripts
     let buildservice: Box<dyn BuildService + Send + Sync> = match config.build {
-        Build::Custom( cb ) => Box::new(cb),
-        Build::Rust( rb ) => Box::new(rb),
+        Build::Custom(cb) => {
+            debug!("Using custom build");
+            Box::new(cb)
+        }
+        Build::Rust(rb) => {
+            debug!("Using Rust build");
+            Box::new(rb)
+        }
     };
 
+    info!("Starting build...");
     let path = buildservice.build(project_path.to_path_buf()).await?;
     let bin_folder = project_path.join(path);
+    info!("Build complete. Output folder: {:?}", bin_folder);
 
-    println!("bin_folder: {:?}", bin_folder);
     let (writer, mut reader) = duplex(8 * 1024);
+    info!("Creating in-memory tar archive...");
 
     tokio::spawn(async move {
         let mut builder = Builder::new(writer);
-        // Use `.await` since tokio_tar is async
         if let Err(e) = builder.append_dir_all(".", bin_folder).await {
-            eprintln!("tar append_dir_all error: {}", e);
+            error!("tar append_dir_all error: {}", e);
             return;
         }
         if let Err(e) = builder.finish().await {
-            eprintln!("tar finish error: {}", e);
+            error!("tar finish error: {}", e);
         }
-        // When this task ends, `writer` is dropped, which causes EOF on reader side
+        debug!("Tarball creation task completed");
     });
 
     // Create a stream of RegistryPushRequest from reader
@@ -89,35 +103,45 @@ pub async fn run(path: &str) -> Result<()> {
         loop {
             match reader.read(&mut buf).await {
                 Ok(0) => {
-                    // EOF
+                    debug!("Finished reading all tar data");
                     break;
                 }
                 Ok(n) => {
-                    // yield a chunk
+                    debug!("Read {} bytes from tar stream", n);
                     let req = RegistryPushRequest {
                         data: buf[..n].to_vec(),
                     };
                     yield req;
                 }
                 Err(e) => {
-                    eprintln!("Error reading from pipe: {}", e);
+                    error!("Error reading from pipe: {}", e);
                     break;
                 }
             }
         }
     };
 
+    info!("Connecting to RegistryService...");
     let mut client = RegistryServiceClient::connect("http://localhost:50001").await?;
+    info!("Sending tar data to registry...");
     let response = client.push(Request::new(outbound)).await?.into_inner();
+    debug!("Registry responded with digest: {}", response.digest);
 
     let key = config.project.name;
+    info!("Associating digest with project key: {}", key);
 
     let mut client = ControlPlaneServiceClient::connect("http://localhost:50002").await?;
-    let request = SetDigestToNameRequest { key: key.clone(), digest: response.digest };
-    let response = client.set_digest_to_name(Request::new(request)).await?.into_inner();
+    let request = SetDigestToNameRequest {
+        key: key.clone(),
+        digest: response.digest,
+    };
 
-    match response.success {
-        true => Ok({}),
-        false => bail!("Something happend when setting digiest to key")
+    let response = client.set_digest_to_name(Request::new(request)).await?.into_inner();
+    if response.success {
+        info!("Successfully set digest for key '{}'", key);
+        Ok(())
+    } else {
+        error!("Failed to associate digest with key '{}'", key);
+        bail!("Something happened when setting digest to key")
     }
 }
