@@ -1,34 +1,41 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashMap, path::{Path, PathBuf}, sync::Arc, time::Duration};
 
 use anyhow::{Ok, Result};
 use tokio::{process::Command, sync::Mutex, time::sleep};
 use tonic::Request;
 use url::Url;
 
-use crate::client::registry_clint::RegistryClient;
+use crate::{client::registry_clint::RegistryClient};
 use proto::api::action::{function_runner_service_client::FunctionRunnerServiceClient, InvokeRequest};
 
 const SERVER_STARTUP_TIMEOUT_MS: u64 = 3000;
 const SERVER_STARTUP_RETRY_INTERVAL_MS: u64 = 10;
 
+pub struct Config {
+    pub is_dev: bool,
+}
+
 pub struct NativeWorker {
     function_urls: Arc<Mutex<HashMap<String, Url>>>,
-    registry_service: RegistryClient
+    registry_service: RegistryClient,
+    config: Config,
 }
 
 impl NativeWorker {
-    pub fn new(registry_service: RegistryClient) -> Result<Self> {
+    pub fn new(registry_service: RegistryClient, server_config: Config) -> Result<Self> {
         Ok(Self {
             function_urls: Arc::new(Mutex::new(HashMap::new())),
-            registry_service
+            registry_service,
+            config: server_config,
         })
     }
 }
 
 impl NativeWorker {
     pub async fn execute(&self, digest: String, body: String) -> Result<String> {
-        let uri = self.get_available_handler_uri(digest).await?;
-        let mut client = FunctionRunnerServiceClient::connect(uri.to_string()).await?;
+        let socket_path = self.get_available_handler_uri(digest).await?;
+        let uri = format!("unix://{}", socket_path.path());
+        let mut client = FunctionRunnerServiceClient::connect(uri).await?;
         let resp = client
             .invoke(Request::new(InvokeRequest {
                 payload: Some(body),
@@ -57,13 +64,25 @@ impl NativeWorker {
 
     async fn start_handler(&self, bin_path: PathBuf) -> Result<Url> {
         let bootstrap_path = bin_path.join("bootstrap");
+        let uuid = uuid::Uuid::new_v4();
+
+        let socket_path = match self.config.is_dev {
+            true => Path::new("/tmp"),
+            false => Path::new("/run"),
+        }.join(uuid.to_string())
+            .with_extension("sock");
+
+        let socket_path_str = socket_path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid socket path"))?;
 
         Command::new(&bootstrap_path)
+            .env("SOCKET_PATH", socket_path_str)
             .spawn()
             .map_err(|e| anyhow::anyhow!("Failed to spawn handler: {}", e))?;
 
-        let url = Url::parse("http://localhost:54036")
-            .map_err(|e| anyhow::anyhow!("Failed to parse URL: {}", e))?;
+        let url = Url::from_file_path(&socket_path)
+            .map_err(|_| anyhow::anyhow!("Failed to create URL from socket path"))?;
 
         self.wait_for_server_ready(&url).await?;
         Ok(url)
@@ -74,7 +93,8 @@ impl NativeWorker {
         let retry_interval = Duration::from_millis(SERVER_STARTUP_RETRY_INTERVAL_MS);  
 
         for attempt in 1..= max_attempts {
-            match FunctionRunnerServiceClient::connect(url.to_string()).await {
+            let uri = format!("unix://{}", url.path());
+            match FunctionRunnerServiceClient::connect(uri).await {
                 std::result::Result::Ok(_) => {
                     println!("Server is ready after {} attempts", attempt);
                     return Ok(());

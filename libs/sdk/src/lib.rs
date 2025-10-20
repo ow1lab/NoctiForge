@@ -1,7 +1,8 @@
 use proto::api::action::{function_runner_service_server::{FunctionRunnerService, FunctionRunnerServiceServer}, InvokeRequest, InvokeResult};
+use tokio::net::UnixListener;
 use tonic::{Response};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{future::Future, marker::PhantomData, net::SocketAddr};
+use std::{future::Future, marker::PhantomData};
 
 pub use tonic::Status;
 
@@ -57,14 +58,22 @@ where
             }))
         }
     }
-    let addr: SocketAddr = "[::1]:54036".parse()?;
-    log::info!("Starting server on {}", addr);
+
+    let socket_path = std::env::var("SOCKET_PATH")
+        .expect("'SOCKET_PATH' was not set");
+
+    if std::path::Path::new(&socket_path).exists() {
+        std::fs::remove_file(&socket_path)?;
+    }
+
+    let listener = UnixListener::bind(&socket_path)?;
+    log::info!("Starting server on Unix socket: {}", socket_path);
 
     let svc = FunctionRunnerServiceServer::new(MyService { handler, _marker: PhantomData });
 
     tonic::transport::Server::builder()
         .add_service(svc)
-        .serve(addr)
+        .serve_with_incoming(tokio_stream::wrappers::UnixListenerStream::new(listener))
         .await?;
 
     Ok(())

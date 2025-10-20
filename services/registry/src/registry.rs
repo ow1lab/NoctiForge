@@ -8,7 +8,7 @@ use proto::api::registry::{
     RegistryPushResponse,
 };
 use sha2::{Digest, Sha256};
-use tokio::{fs::{read, write}, io::AsyncReadExt, task::futures};
+use tokio::{fs::{read, write}, io::AsyncReadExt};
 use tokio_stream::{Stream, StreamExt};
 use tokio_tar::Archive;
 use tonic::{
