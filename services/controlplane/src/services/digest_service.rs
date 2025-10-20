@@ -56,7 +56,7 @@ impl DigestService {
         .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
 
         match result {
-            Some((digest,)) => Ok(Response::new(GetDigestByNameResponse { digest: digest.into() })),
+            Some((digest,)) => Ok(Response::new(GetDigestByNameResponse { digest })),
             None => Err(Status::not_found(format!("Digest not found for name: {}", key))),
         }
     }

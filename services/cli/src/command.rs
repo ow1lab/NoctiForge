@@ -65,5 +65,5 @@ fn setup_tracing(verbosity: u8) -> Result<()> {
         .with_target(false)
         .init();
 
-    return Ok(())
+    Ok(())
 }

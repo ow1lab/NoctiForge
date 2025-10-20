@@ -15,19 +15,19 @@ pub struct RegistryClient {
 
 impl RegistryClient {
     pub fn new(addr: String) -> Self {
-        Self { addr: addr }
+        Self { addr }
     }
 }
 
 impl RegistryClient {
     pub async fn get_tar_by_digest(&self, digest: &str) -> Result<PathBuf> {
-        let dir_path = get_dir_path(&digest);
+        let dir_path = get_dir_path(digest);
 
         if dir_path.exists() {
             return Ok(dir_path);
         }
 
-        let data = self.fetch_digest(&digest).await?;
+        let data = self.fetch_digest(digest).await?;
         self.extract_archive(&data, &dir_path).await?;
         Ok(dir_path)
     }

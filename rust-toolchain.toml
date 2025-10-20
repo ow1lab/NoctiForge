@@ -1,5 +1,5 @@
 [toolchain]
 channel = "stable"
-components = ["rust-analyzer", "rust-src"]
+components = ["rust-analyzer", "rust-src", "clippy"]
 profile = "default"
 targets = [ "x86_64-unknown-linux-musl", "x86_64-unknown-linux-musl" ]

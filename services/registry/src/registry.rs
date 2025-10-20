@@ -88,7 +88,7 @@ impl RegistryService for LocalBackend {
             })?;
         }
 
-        Ok(Response::new(RegistryPushResponse { digest: digest }))
+        Ok(Response::new(RegistryPushResponse { digest }))
     }
 }
 

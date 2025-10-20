@@ -8,7 +8,7 @@ pub struct ControlPlaneClient {
 
 impl ControlPlaneClient {
     pub fn new(addr: String) -> Self {
-        Self { addr: addr }
+        Self { addr }
     }
 }
 
