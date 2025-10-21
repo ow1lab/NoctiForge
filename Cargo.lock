@@ -3141,6 +3141,8 @@ dependencies = [
  "tokio",
  "tokio-tar",
  "tonic",
+ "tracing",
+ "tracing-subscriber",
  "url",
  "uuid",
 ]

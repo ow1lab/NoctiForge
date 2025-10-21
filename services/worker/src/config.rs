@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum Environment {
     Development,
     Production,
