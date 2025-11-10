@@ -29,6 +29,9 @@
             just
             protobuf 
             rust
+
+            libseccomp
+            pkg-config 
           ];
         };
       }

@@ -5,11 +5,12 @@ edition = "2024"
 
 [dependencies]
 anyhow = { version = "1" }
+libcontainer = "0.5"
 proto = { path = "../../libs/proto" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "fs"] }
 tokio-tar = "0"
 tonic = "0"
-url = "2.5"
-uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+url = "2.5"
+uuid = { version = "1", features = ["v4"] }
