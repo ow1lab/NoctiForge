@@ -8,7 +8,7 @@ use libcontainer::{
 use tokio::{fs::{self, DirBuilder, File}, io::{self, AsyncWriteExt, BufWriter}};
 use url::Url;
 use uuid::Uuid;
-use crate::{path::get_instence_path, worker::spec::{get_rootless, SysUserParms}};
+use crate::{path::get_instence_path, worker::spec::{get_spec, SysUserParms}};
 
 
 pub struct ProccesContainer {
@@ -50,7 +50,7 @@ impl ProccesContainer {
 
         DirBuilder::new().create(&path).await?;
 
-        let spec = get_rootless(sys_user)?;
+        let spec = get_spec(sys_user)?;
 
         // Create Spec
         let file = File::create(path.join("config.json")).await?;
