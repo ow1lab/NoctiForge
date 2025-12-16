@@ -1,47 +1,53 @@
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
-use libcontainer::{
-    container::{builder::ContainerBuilder, Container},
-    syscall::{syscall::SyscallType},
+use crate::{
+    path::get_instence_path,
+    worker::spec::{SysUserParms, get_spec},
 };
-use tokio::{fs::{self, DirBuilder, File}, io::{self, AsyncWriteExt, BufWriter}};
+use anyhow::{Context, Ok, Result};
+use libcontainer::{
+    container::{Container, ContainerStatus, builder::ContainerBuilder},
+    syscall::syscall::SyscallType,
+};
+use tokio::{
+    fs::{self, DirBuilder, File},
+    io::{AsyncWriteExt, BufWriter},
+};
 use url::Url;
-use uuid::Uuid;
-use crate::{path::get_instence_path, worker::spec::{get_spec, SysUserParms}};
-
 
 pub struct ProccesContainer {
     container: Container,
-    instance_id: String,
-    sock_path: Url,
 }
 
 impl ProccesContainer {
-    pub async fn new(root_path: PathBuf, handle_bin: PathBuf, sys_user: &SysUserParms) -> Result<Self> {
-        _ = handle_bin;
+    pub async fn new(
+        digest: &str,
+        handle_bin: PathBuf,
+        root_path: PathBuf,
+        sys_user: &SysUserParms,
+    ) -> Result<Self> {
+        // TODO: Support more creation of more func of the same type
+        let instance_id = digest.to_string();
 
-        let instance_id = Uuid::new_v4().to_owned().to_string();
         let rootfs = Self::create_rootfs(&instance_id, handle_bin, sys_user).await?;
-
-        let container = ContainerBuilder::new(instance_id.clone(), SyscallType::default())
-            .with_root_path(root_path).expect("invalid root path")
+        let mut container = ContainerBuilder::new(instance_id.clone(), SyscallType::default())
+            .with_root_path(root_path)
+            .expect("invalid root path")
             .as_init(rootfs.clone())
+            .with_detach(true)
             .with_systemd(false)
             .build()?;
 
-        // TODO: make this inte instance path
-        let sock_path = format!("unix://{}/rootfs/run/app.sock", rootfs.to_string_lossy());
-        let url = Url::parse(&sock_path)?;
+        container.start()?;
 
-        Ok(Self {
-            container,
-            instance_id,
-            sock_path: url,
-        })
+        Ok(Self { container })
     }
 
-    async fn create_rootfs(instance_id: &str, handle_bin: PathBuf, sys_user: &SysUserParms) -> Result<PathBuf> {
+    async fn create_rootfs(
+        instance_id: &str,
+        handle_bin: PathBuf,
+        sys_user: &SysUserParms,
+    ) -> Result<PathBuf> {
         let path = PathBuf::from(get_instence_path(instance_id));
 
         if path.exists() {
@@ -69,18 +75,18 @@ impl ProccesContainer {
         Ok(path)
     }
 
-    pub fn start(&mut self) -> Result<()> {
-        self.container.start().with_context(|| "failed to start container")?;
-        Ok(())
-    }
-
-    pub fn get_url(&self) -> Url {
-        self.sock_path.clone()
+    pub fn get_url(&self) -> Result<Url> {
+        let sock_path = format!(
+            "unix://{}/rootfs/run/app.sock",
+            self.container.bundle().to_string_lossy()
+        );
+        let url = Url::parse(&sock_path)?;
+        Ok(url)
     }
 
     #[allow(dead_code)]
     pub async fn cleanup(&self) -> Result<()> {
-        let path = PathBuf::from(get_instence_path(&self.instance_id));
+        let path = self.container.bundle().as_path();
         if path.exists() {
             tokio::fs::remove_dir_all(&path)
                 .await
@@ -90,7 +96,20 @@ impl ProccesContainer {
     }
 }
 
-pub async fn copy_dir_all(src: PathBuf, dst: PathBuf) -> io::Result<()> {
+impl TryFrom<PathBuf> for ProccesContainer {
+    type Error = anyhow::Error;
+
+    fn try_from(value: PathBuf) -> std::result::Result<Self, Self::Error> {
+        let mut container = Container::load(value)?;
+
+        if container.status() != ContainerStatus::Running {
+            container.start()?
+        }
+        Ok(Self { container })
+    }
+}
+
+pub async fn copy_dir_all(src: PathBuf, dst: PathBuf) -> Result<()> {
     let mut stack = vec![(src, dst)];
 
     while let Some((src, dst)) = stack.pop() {
@@ -113,4 +132,3 @@ pub async fn copy_dir_all(src: PathBuf, dst: PathBuf) -> io::Result<()> {
 
     Ok(())
 }
-

@@ -1,15 +1,19 @@
-use std::{
-    collections::HashMap, path::PathBuf, sync::Arc, time::Duration
-};
+use std::{path::PathBuf, time::Duration};
 
 use anyhow::{Ok, Result};
 use libcontainer::syscall::Syscall;
-use tokio::{sync::Mutex, time::sleep};
+use tokio::time::sleep;
 use tonic::Request;
 use tracing::{debug, info, instrument, warn};
 use url::Url;
 
-use crate::{client::registry_clint::RegistryClient, worker::{container, spec::SysUserParms}};
+use crate::{
+    client::registry_clint::RegistryClient,
+    worker::{
+        container::{self, ProccesContainer},
+        spec::SysUserParms,
+    },
+};
 use proto::api::action::{
     InvokeRequest, function_runner_service_client::FunctionRunnerServiceClient,
 };
@@ -22,10 +26,9 @@ pub struct Config {
 }
 
 pub struct NativeWorker {
-    function_urls: Arc<Mutex<HashMap<String, Url>>>,
     registry_service: RegistryClient,
     root_path: PathBuf,
-    sysuser: SysUserParms 
+    sysuser: SysUserParms,
 }
 
 impl NativeWorker {
@@ -33,10 +36,10 @@ impl NativeWorker {
         registry_service: RegistryClient,
         root_path: PathBuf,
         syscall: &dyn Syscall,
-        server_config: Config) -> Result<Self> {
+        server_config: Config,
+    ) -> Result<Self> {
         info!(is_dev = server_config.is_dev, "Creating NativeWorker");
         Ok(Self {
-            function_urls: Arc::new(Mutex::new(HashMap::new())),
             registry_service,
             root_path,
             sysuser: SysUserParms {
@@ -52,14 +55,15 @@ impl NativeWorker {
     pub async fn execute(&self, digest: String, body: String) -> Result<String> {
         debug!("Executing function");
 
-        let socket_path = self.get_available_handler_uri(digest.clone()).await?;
-        let uri = format!("unix://{}", socket_path.path());
+        let uri = self.get_available_handler_uri(digest.clone()).await?;
 
         debug!(uri = %uri, "Connecting to function handler");
-        let mut client = FunctionRunnerServiceClient::connect(uri).await.map_err(|e| {
-            warn!(digest = %digest, error = %e, "Failed to connect to function handler");
-            e
-        })?;
+        let mut client = FunctionRunnerServiceClient::connect(uri.to_string())
+            .await
+            .map_err(|e| {
+                warn!(digest = %digest, error = %e, "Failed to connect to function handler");
+                e
+            })?;
 
         let resp = client
             .invoke(Request::new(InvokeRequest {
@@ -77,32 +81,27 @@ impl NativeWorker {
     }
 
     async fn get_available_handler_uri(&self, digest: String) -> Result<Url> {
-        // Check if URL is already cached
-        {
-            let urls = self.function_urls.lock().await;
-            if let Some(url) = urls.get(&digest) {
-                debug!(digest = %digest, socket = %url.path(), "Using cached handler");
-                return Ok(url.clone());
-            }
-        }
+        // TODO: This is a workaround i don't like as there could be a very low way that this
+        // fails. 
+        let short_digest = &digest[..16];
 
-        info!(digest = %digest, "Creating new handler");
-        let dir_path = self.registry_service.get_tar_by_digest(&digest).await?;
+        let proc = if self.root_path.join(&short_digest).exists() {
+            info!(short_digest = %short_digest, "Loading existing handler");
+            ProccesContainer::try_from(self.root_path.join(&short_digest).to_path_buf())?
+        } else {
+            info!(short_digest = %short_digest, "Creating new handler");
+            let dir_path = self.registry_service.get_tar_by_digest(&digest).await?;
+            container::ProccesContainer::new(
+                &short_digest,
+                dir_path,
+                self.root_path.clone(),
+                &self.sysuser,
+            )
+            .await?
+        };
 
-        let mut proc = container::ProccesContainer::new(
-            self.root_path.clone(),
-            dir_path,
-            &self.sysuser).await?;
-        info!(digest = %digest, "Starting handler");
-        proc.start()?;
-
-        let url = proc.get_url();
-        debug!(url = %url, "Connecting to handler");
+        let url = proc.get_url()?;
         self.wait_for_server_ready(&url).await?;
-
-        // Insert into cache
-        self.function_urls.lock().await.insert(digest.clone(), url.clone());
-        info!(digest = %digest, socket = %url.path(), "Handler cached");
 
         Ok(url)
     }
@@ -111,10 +110,11 @@ impl NativeWorker {
         let max_attempts = (SERVER_STARTUP_TIMEOUT_MS / SERVER_STARTUP_RETRY_INTERVAL_MS) as u32;
         let retry_interval = Duration::from_millis(SERVER_STARTUP_RETRY_INTERVAL_MS);
 
-        debug!(max_attempts, "Waiting for server to be ready");
+        let uri = url.to_string();
+        debug!(max_attempts, uri, "Waiting for server to be ready");
 
         for attempt in 1..=max_attempts {
-            match FunctionRunnerServiceClient::connect(url.to_string()).await {
+            match FunctionRunnerServiceClient::connect(uri.clone()).await {
                 std::result::Result::Ok(_) => {
                     debug!(attempts = attempt, "Server is ready");
                     return Ok(());
