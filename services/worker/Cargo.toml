@@ -12,7 +12,7 @@ pentacle = "1.1.0"
 proto = { path = "../../libs/proto" }
 serde_json = "1"
 tempfile = "3.23.0"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "fs", "sigal"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "fs", "signal"] }
 tokio-tar = "0"
 tokio-util = "0.7.17"
 tonic = "0"

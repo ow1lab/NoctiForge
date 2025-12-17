@@ -91,9 +91,9 @@ impl NativeWorker {
         // fails. 
         let short_digest = &digest[..16];
 
-        let proc = if self.root_path.join(short_digest).exists() {
+        let proc = if ProccesContainer::exist(&self.root_path, short_digest) {
             info!(short_digest = %short_digest, "Loading existing handler");
-            ProccesContainer::try_from(self.root_path.join(short_digest).to_path_buf())?
+            ProccesContainer::load(&self.root_path, short_digest).await?
         } else {
             info!(short_digest = %short_digest, "Creating new handler");
             let dir_path = self.registry_service.get_tar_by_digest(&digest).await?;

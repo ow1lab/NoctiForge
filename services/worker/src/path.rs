@@ -6,10 +6,6 @@ pub fn get_dir_path(digest: &str) -> PathBuf {
     get_pkgs_dir().join(digest)
 }
 
-pub fn get_instence_path(instance_id: &str) -> PathBuf {
-    get_run_dir().join(instance_id)
-}
-
 pub async fn copy_dir_all(src: PathBuf, dst: PathBuf) -> Result<()> {
     let mut stack = vec![(src, dst)];
     while let Some((src, dst)) = stack.pop() {
@@ -27,10 +23,6 @@ pub async fn copy_dir_all(src: PathBuf, dst: PathBuf) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn get_run_dir() -> PathBuf {
-    get_root_dir_path().join("run")
 }
 
 fn get_root_dir_path() -> PathBuf {
@@ -56,30 +48,9 @@ mod tests {
     }
 
     #[test]
-    fn test_get_run_dir() {
-        let run_dir = get_run_dir();
-        assert_eq!(run_dir, PathBuf::from("/var/lib/noctiforge/native_worker/run"));
-    }
-
-    #[test]
     fn test_get_pkgs_dir() {
         let pkgs_dir = get_pkgs_dir();
         assert_eq!(pkgs_dir, PathBuf::from("/var/lib/noctiforge/native_worker/pkgs"));
-    }
-
-    #[test]
-    fn test_get_instence_path() {
-        let instance_path = get_instence_path("test_instance");
-        assert_eq!(
-            instance_path,
-            PathBuf::from("/var/lib/noctiforge/native_worker/run/test_instance")
-        );
-    }
-
-    #[test]
-    fn test_get_instence_path_with_special_chars() {
-        let instance_path = get_instence_path("abc-123_xyz");
-        assert!(instance_path.to_string_lossy().contains("abc-123_xyz"));
     }
 
     #[test]

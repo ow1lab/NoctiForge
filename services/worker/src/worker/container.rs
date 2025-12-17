@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::{
-    path::{copy_dir_all, get_instence_path},
+    path::copy_dir_all,
     worker::spec::{get_spec, SysUserParms},
 };
 use anyhow::{Context, Result};
@@ -14,21 +14,6 @@ use tokio::{
     io::{AsyncWriteExt, BufWriter},
 };
 use url::Url;
-
-// Trait for path operations - enables mocking filesystem paths
-#[cfg_attr(test, mockall::automock)]
-pub trait PathResolver {
-    fn get_instance_path(&self, instance_id: &str) -> PathBuf;
-}
-
-// Real implementation using the actual path function
-pub struct DefaultPathResolver;
-
-impl PathResolver for DefaultPathResolver {
-    fn get_instance_path(&self, instance_id: &str) -> PathBuf {
-        get_instence_path(instance_id)
-    }
-}
 
 // Trait for abstracting container operations - enables mocking
 #[cfg_attr(test, mockall::automock)]
@@ -119,8 +104,21 @@ impl ProccesContainer {
             root_path,
             sys_user,
             &LibcontainerOps,
-            &DefaultPathResolver,
         ).await
+    }
+
+
+    pub async fn load(root_path: &PathBuf, instance_id: &str) -> Result<Self> {
+        Self::load_with_deps(root_path, instance_id, &LibcontainerOps).await
+    }
+
+    async fn load_with_deps(root_path: &PathBuf, instance_id: &str, ops: &impl ContainerOps) -> Result<Self> {
+        let mut container = ops.load_container(root_path.join("state").join(instance_id))?;
+
+        if container.status() != ContainerStatus::Running {
+            ops.start_container(container.as_mut())?;
+        }
+        Ok(Self { container })
     }
 
     async fn new_with_deps(
@@ -129,7 +127,6 @@ impl ProccesContainer {
         root_path: PathBuf,
         sys_user: &SysUserParms,
         ops: &impl ContainerOps,
-        path_resolver: &impl PathResolver,
     ) -> Result<Self> {
         let instance_id = digest.to_string();
 
@@ -137,12 +134,12 @@ impl ProccesContainer {
             &instance_id,
             handle_bin,
             sys_user,
-            path_resolver,
+            root_path.join("run")
         ).await?;
         
         let mut container = ops.build_container(
             instance_id.clone(),
-            root_path,
+            root_path.join("state"),
             rootfs.clone(),
         )?;
 
@@ -155,15 +152,16 @@ impl ProccesContainer {
         instance_id: &str,
         handle_bin: PathBuf,
         sys_user: &SysUserParms,
-        path_resolver: &impl PathResolver,
+        run_path: PathBuf,
     ) -> Result<PathBuf> {
-        let path = path_resolver.get_instance_path(instance_id);
+        let path = run_path.join(instance_id);
 
         if path.exists() {
             anyhow::bail!("Root filesystem path already exists: {}", path.display());
         }
 
-        DirBuilder::new().create(&path).await?;
+        // TODO: need to look at this and see if we should create the folder a head of time?
+        DirBuilder::new().recursive(true).create(&path).await?;
 
         let spec = get_spec(sys_user)?;
 
@@ -193,6 +191,10 @@ impl ProccesContainer {
         Ok(url)
     }
 
+    pub fn exist(root_path: &PathBuf, instance_id: &str) -> bool {
+        root_path.join("state").join(instance_id).exists()
+    }
+
     #[allow(dead_code)]
     pub async fn cleanup(&self) -> Result<()> {
         let path = self.container.bundle();
@@ -202,24 +204,6 @@ impl ProccesContainer {
                 .context("Failed to remove rootfs directory")?;
         }
         Ok(())
-    }
-    
-    // Refactored to use ContainerOps trait
-    fn try_from_with_ops(value: PathBuf, ops: &impl ContainerOps) -> Result<Self> {
-        let mut container = ops.load_container(value)?;
-
-        if container.status() != ContainerStatus::Running {
-            ops.start_container(container.as_mut())?;
-        }
-        Ok(Self { container })
-    }
-}
-
-impl TryFrom<PathBuf> for ProccesContainer {
-    type Error = anyhow::Error;
-
-    fn try_from(value: PathBuf) -> std::result::Result<Self, Self::Error> {
-        Self::try_from_with_ops(value, &LibcontainerOps)
     }
 }
 
@@ -236,7 +220,6 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let handle_bin = temp.path().join("bin");
         let root_path = temp.path().join("root");
-        let instance_path = temp.path().join("instance");
         
         // Setup test filesystem
         fs::create_dir_all(&handle_bin).await.unwrap();
@@ -245,14 +228,6 @@ mod tests {
 
         // Create mocks
         let mut mock_ops = MockContainerOps::new();
-        let mut mock_path_resolver = MockPathResolver::new();
-        
-        // Mock path resolver to return our temp directory
-        let instance_clone = instance_path.clone();
-        mock_path_resolver
-            .expect_get_instance_path()
-            .times(1)
-            .return_once(move |_| instance_clone);
         
         // Set up container expectations
         mock_ops
@@ -278,7 +253,6 @@ mod tests {
             root_path,
             &sys_user,
             &mock_ops,
-            &mock_path_resolver,
         ).await;
         
         assert!(result.is_ok());
@@ -312,21 +286,14 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let handle_bin = temp.path().join("bin");
         let root_path = temp.path().join("root");
-        let instance_path = temp.path().join("instance");
         
         fs::create_dir_all(&handle_bin).await.unwrap();
         fs::create_dir_all(&root_path).await.unwrap();
         fs::write(handle_bin.join("app"), b"test").await.unwrap();
 
         let mut mock_ops = MockContainerOps::new();
-        let mut mock_path_resolver = MockPathResolver::new();
         
         // Mock path resolver
-        let instance_clone = instance_path.clone();
-        mock_path_resolver
-            .expect_get_instance_path()
-            .return_once(move |_| instance_clone);
-        
         let expected_instance = "test_digest_123".to_string();
         let expected_instance_clone = expected_instance.clone();
         
@@ -355,58 +322,13 @@ mod tests {
             root_path,
             &sys_user,
             &mock_ops,
-            &mock_path_resolver,
         ).await;
-        
-        // Now it should succeed with mocks
-        assert!(result.is_ok());
-    }
 
-    #[tokio::test]
-    async fn test_path_resolver_is_called() {
-        let temp = TempDir::new().unwrap();
-        let handle_bin = temp.path().join("bin");
-        let root_path = temp.path().join("root");
-        let instance_path = temp.path().join("custom_instance_path");
-        
-        fs::create_dir_all(&handle_bin).await.unwrap();
-        fs::create_dir_all(&root_path).await.unwrap();
-        fs::write(handle_bin.join("app"), b"test").await.unwrap();
-
-        let mut mock_ops = MockContainerOps::new();
-        let mut mock_path_resolver = MockPathResolver::new();
-        
-        // Verify path resolver is called with correct instance_id
-        mock_path_resolver
-            .expect_get_instance_path()
-            .withf(|id| id == "my_digest")
-            .times(1)
-            .return_once(move |_| instance_path);
-        
-        mock_ops
-            .expect_build_container()
-            .returning(|_, _, _| {
-                let mut mock = MockContainerWrapper::new();
-                mock.expect_bundle()
-                    .return_const(PathBuf::from("/tmp/test"));
-                Ok(Box::new(mock))
-            });
-        
-        mock_ops
-            .expect_start_container()
-            .returning(|_| Ok(()));
-
-        let sys_user = SysUserParms { uid: 0, gid: 0 };
-        let result = ProccesContainer::new_with_deps(
-            "my_digest",
-            handle_bin,
-            root_path,
-            &sys_user,
-            &mock_ops,
-            &mock_path_resolver,
-        ).await;
-        
-        assert!(result.is_ok());
+        assert!(
+            result.is_ok(),
+            "ProcessContainer failed with error: {:?}",
+            result.err()
+        );
     }
 
     #[tokio::test]
@@ -414,7 +336,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let handle_bin = temp.path().join("bin");
         let root_path = temp.path().join("root");
-        let instance_path = temp.path().join("existing");
+        let instance_path = root_path.join("run").join("test");
         
         // Create the instance path beforehand
         fs::create_dir_all(&instance_path).await.unwrap();
@@ -423,13 +345,6 @@ mod tests {
         fs::write(handle_bin.join("app"), b"test").await.unwrap();
 
         let mut mock_ops = MockContainerOps::new();
-        let mut mock_path_resolver = MockPathResolver::new();
-        
-        // Mock returns existing path
-        let existing_clone = instance_path.clone();
-        mock_path_resolver
-            .expect_get_instance_path()
-            .return_once(move |_| existing_clone);
         
         // Container ops should NOT be called since we fail early
         mock_ops
@@ -443,15 +358,14 @@ mod tests {
             root_path,
             &sys_user,
             &mock_ops,
-            &mock_path_resolver,
         ).await;
         
         // Should fail with "already exists" error
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_try_from_with_running_container() {
+    #[tokio::test]
+    async fn test_try_from_with_running_container() {
         let temp = TempDir::new().unwrap();
         let container_path = temp.path().join("container");
         
@@ -475,16 +389,17 @@ mod tests {
             .expect_start_container()
             .times(0);
 
-        let result = ProccesContainer::try_from_with_ops(
-            container_path,
+        let result = ProccesContainer::load_with_deps(
+            &container_path,
+            "container",
             &mock_ops,
-        );
+        ).await;
         
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_try_from_with_stopped_container() {
+    #[tokio::test]
+    async fn test_try_from_with_stopped_container() {
         let temp = TempDir::new().unwrap();
         let container_path = temp.path().join("container");
         
@@ -509,10 +424,11 @@ mod tests {
             .times(1)
             .returning(|_| Ok(()));
 
-        let result = ProccesContainer::try_from_with_ops(
-            container_path,
+        let result = ProccesContainer::load_with_deps(
+            &container_path,
+            "contaienr",
             &mock_ops,
-        );
+        ).await;
         
         assert!(result.is_ok());
     }
@@ -536,31 +452,5 @@ mod tests {
         let result = container.cleanup().await;
         assert!(result.is_ok());
         assert!(!bundle_path.exists());
-    }
-
-    #[test]
-    fn test_default_path_resolver() {
-        // Test that the real path resolver works
-        let resolver = DefaultPathResolver;
-        let path = resolver.get_instance_path("test123");
-        
-        // Should return the expected path structure
-        assert_eq!(
-            path,
-            PathBuf::from("/var/lib/noctiforge/native_worker/run/test123")
-        );
-    }
-
-    #[test]
-    fn test_default_path_resolver_different_ids() {
-        let resolver = DefaultPathResolver;
-        
-        let path1 = resolver.get_instance_path("instance1");
-        let path2 = resolver.get_instance_path("instance2");
-        
-        // Different IDs should produce different paths
-        assert_ne!(path1, path2);
-        assert!(path1.to_string_lossy().contains("instance1"));
-        assert!(path2.to_string_lossy().contains("instance2"));
     }
 }

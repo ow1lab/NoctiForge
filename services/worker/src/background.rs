@@ -34,7 +34,7 @@ impl BackgroundJob {
     }
 
     async fn execute() -> Result<()> {
-        Err(anyhow::format_err!("hello"))
+        Ok(())
     }
 
     pub fn stop(&mut self) {
