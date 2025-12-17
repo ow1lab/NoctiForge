@@ -80,6 +80,12 @@ impl NativeWorker {
         Ok(resp.output)
     }
 
+    #[allow(dead_code)]
+    pub fn clean_handlers(&self) -> Result<()> {
+        println!("clean handler");
+        Ok(())
+    }
+
     async fn get_available_handler_uri(&self, digest: String) -> Result<Url> {
         // TODO: This is a workaround i don't like as there could be a very low way that this
         // fails. 

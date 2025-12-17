@@ -8,7 +8,7 @@ use nix::sys::stat::Mode;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use libcontainer::syscall::syscall::create_syscall;
 use libcontainer::utils::create_dir_all_with_mode;
 use proto::api::worker::worker_service_server::WorkerServiceServer;
@@ -36,8 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let _ =
-        tracing::info_span!("app", name = "worker", version = env!("CARGO_PKG_VERSION")).entered();
+    let _ = tracing::info_span!("app", name = "worker", version = env!("CARGO_PKG_VERSION")).entered();
 
     pentacle::ensure_sealed().context("failed to seal /proc/self/exe")?;
 
@@ -63,29 +62,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     )?;
 
-    let mut background_server = BackgroundJob::new(Duration::from_secs(10));
+    let background_server = BackgroundJob::new(Duration::from_secs(10)));
     let worker_server = WorkerServer::new(function_worker, controlplane_client);
 
     info!("Worker listening on {}", config.addr);
-    background_server.start();
 
-    // Graceful shutdown with signal handling
-    let server = Server::builder()
+    background_server.start();
+    Server::builder()
         .add_service(WorkerServiceServer::new(worker_server))
-        .serve(config.addr);
-    
-    tokio::select! {
-        result = server => {
-            result?;
-        }
-        _ = tokio::signal::ctrl_c() => {
-            info!("Received shutdown signal (CTRL+C)");
-        }
-    }
-    
+        .serve(config.addr)
+        .await
+        .map_err(|e| {
+            error!("Server error: {}", e);
+            e
+        })?;
     background_server.stop();
+
     info!("Server shut down gracefully");
-    Ok(())}
+    Ok(())
+}
 
 fn determine_rootpath(syscall: &dyn libcontainer::syscall::Syscall) -> Result<PathBuf> {
     let uid = syscall.get_uid().as_raw();
