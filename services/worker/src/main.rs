@@ -65,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     let mut background_server = BackgroundJob::new(Duration::from_secs(10));
-    let worker_server = WorkerServer::new(function_worker, controlplane_client);
+    let worker_server = WorkerServer::new(function_worker.clone(), controlplane_client);
 
     info!("Worker listening on {}", config.addr);
     background_server.start();
@@ -84,8 +84,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     
-    background_server.stop();
     info!("Server shut down gracefully");
+    background_server.stop();
+    function_worker.clean_all_handlers().await?;
     Ok(())}
 
 fn determine_rootpath(syscall: &dyn libcontainer::syscall::Syscall) -> Result<PathBuf> {

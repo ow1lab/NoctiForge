@@ -6,13 +6,14 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use libcontainer::{
-    container::{Container, ContainerStatus, builder::ContainerBuilder},
+    container::{builder::ContainerBuilder, Container, ContainerStatus},
     syscall::syscall::SyscallType,
 };
 use tokio::{
-    fs::{DirBuilder, File},
+    fs::{self, DirBuilder, File},
     io::{AsyncWriteExt, BufWriter},
 };
+use tracing::info;
 use url::Url;
 
 const CONTAINER_STATE_FOLDER: &str = "state";
@@ -39,6 +40,7 @@ pub trait ContainerWrapper: Send + Sync {
     fn bundle(&self) -> PathBuf;
     fn status(&self) -> ContainerStatus;
     fn start(&mut self) -> Result<()>;
+    fn delete(&mut self) -> Result<()>;
 }
 
 // Wrapper implementation for real Container
@@ -55,6 +57,11 @@ impl ContainerWrapper for RealContainerWrapper {
     
     fn start(&mut self) -> Result<()> {
         self.0.start()?;
+        Ok(())
+    }
+
+    fn delete(&mut self) -> Result<()> {
+        self.0.delete(true)?;
         Ok(())
     }
 }
@@ -74,7 +81,8 @@ impl ContainerOps for LibcontainerOps {
             .expect("invalid root path")
             .as_init(rootfs)
             .with_detach(true)
-            .with_systemd(false)
+            // TODO: Should we set it to true. or can we set that to false?
+            .with_systemd(true)
             .build()?;
         Ok(Box::new(RealContainerWrapper(container)))
     }
@@ -85,6 +93,7 @@ impl ContainerOps for LibcontainerOps {
     }
     
     fn load_container(&self, path: PathBuf) -> Result<Box<dyn ContainerWrapper>> {
+        debug!("loading container on {:?}", path);
         let container = Container::load(path)?;
         Ok(Box::new(RealContainerWrapper(container)))
     }
@@ -198,9 +207,25 @@ impl ProccesContainer {
         root_path.join(CONTAINER_STATE_FOLDER).join(instance_id).exists()
     }
 
+    pub async fn get_all(root_path: &PathBuf) -> Result<Vec<Self>> {
+        let mut containers: Vec<ProccesContainer> = vec![];
+
+        let path = root_path.join(CONTAINER_STATE_FOLDER);
+        let mut dir = fs::read_dir(path).await?;
+        while let Some(entry) = dir.next_entry().await? {
+            let container_dir = entry.path();
+            let instance_id = container_dir.iter().last().unwrap().to_str().unwrap();
+            let container = ProccesContainer::load(root_path, instance_id).await?;
+            containers.push(container);
+        }
+
+        Ok(containers)
+    }
+
     #[allow(dead_code)]
-    pub async fn cleanup(&self) -> Result<()> {
+    pub async fn cleanup(&mut self) -> Result<()> {
         let path = self.container.bundle();
+        self.container.delete()?;
         if path.exists() {
             tokio::fs::remove_dir_all(&path)
                 .await
@@ -447,8 +472,12 @@ mod tests {
         mock_container
             .expect_bundle()
             .return_const(bundle_clone);
+        mock_container
+            .expect_delete()
+            .returning(|| Ok(()));
+
         
-        let container = ProccesContainer {
+        let mut container = ProccesContainer {
             container: Box::new(mock_container),
         };
         

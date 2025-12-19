@@ -25,6 +25,7 @@ pub struct Config {
     pub is_dev: bool,
 }
 
+#[derive(Clone)]
 pub struct NativeWorker {
     registry_service: RegistryClient,
     root_path: PathBuf,
@@ -80,9 +81,11 @@ impl NativeWorker {
         Ok(resp.output)
     }
 
-    #[allow(dead_code)]
-    pub fn clean_handlers(&self) -> Result<()> {
-        println!("clean handler");
+    pub async fn clean_all_handlers(&self) -> Result<()> {
+        let containers = ProccesContainer::get_all(&self.root_path).await?;
+        for mut container in containers {
+            container.cleanup().await?;
+        }
         Ok(())
     }
 

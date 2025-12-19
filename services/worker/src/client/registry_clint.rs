@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::{path::{Path, PathBuf}};
 
 use anyhow::{Ok, Result};
 use proto::api::registry::{RegistryPullRequest, registry_service_client::RegistryServiceClient};
@@ -10,6 +10,7 @@ use tonic::Request;
 
 use crate::path::get_dir_path;
 
+#[derive(Clone)]
 pub struct RegistryClient {
     pub addr: String,
 }

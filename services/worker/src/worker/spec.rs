@@ -6,6 +6,7 @@ use libcontainer::oci_spec::runtime::{
     LinuxNamespaceType, Mount, ProcessBuilder, RootBuilder, Spec,
 };
 
+#[derive(Clone)]
 pub struct SysUserParms {
     pub uid: u32,
     pub gid: u32,
@@ -76,7 +77,7 @@ fn create_id_mapping(host_id: u32) -> Result<libcontainer::oci_spec::runtime::Li
 }
 
 fn build_rootless_mounts() -> Vec<Mount> {
-    libcontainer::oci_spec::runtime::get_default_mounts()
+    libcontainer::oci_spec::runtime::get_rootless_mounts()
         .into_iter()
         .map(|mut mount| {
             if is_sys_mount(&mount) {
