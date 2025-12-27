@@ -13,7 +13,6 @@ use tokio::{
     fs::{self, DirBuilder, File},
     io::{AsyncWriteExt, BufWriter},
 };
-use tracing::info;
 use url::Url;
 
 const CONTAINER_STATE_FOLDER: &str = "state";
@@ -93,7 +92,6 @@ impl ContainerOps for LibcontainerOps {
     }
     
     fn load_container(&self, path: PathBuf) -> Result<Box<dyn ContainerWrapper>> {
-        debug!("loading container on {:?}", path);
         let container = Container::load(path)?;
         Ok(Box::new(RealContainerWrapper(container)))
     }
@@ -120,10 +118,12 @@ impl ProccesContainer {
     }
 
 
+    #[allow(dead_code)]
     pub async fn load(root_path: &PathBuf, instance_id: &str) -> Result<Self> {
         Self::load_with_deps(root_path, instance_id, &LibcontainerOps).await
     }
 
+    #[allow(dead_code)]
     async fn load_with_deps(root_path: &PathBuf, instance_id: &str, ops: &impl ContainerOps) -> Result<Self> {
         let mut container = ops.load_container(root_path.join(CONTAINER_STATE_FOLDER).join(instance_id))?;
 
@@ -203,10 +203,12 @@ impl ProccesContainer {
         Ok(url)
     }
 
+    #[allow(dead_code)]
     pub fn exist(root_path: &PathBuf, instance_id: &str) -> bool {
         root_path.join(CONTAINER_STATE_FOLDER).join(instance_id).exists()
     }
 
+    #[allow(dead_code)]
     pub async fn get_all(root_path: &PathBuf) -> Result<Vec<Self>> {
         let mut containers: Vec<ProccesContainer> = vec![];
 

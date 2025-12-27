@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{Ok, Result};
 use libcontainer::syscall::Syscall;
@@ -10,8 +10,7 @@ use url::Url;
 use crate::{
     client::registry_clint::RegistryClient,
     worker::{
-        container::{self, ProccesContainer},
-        spec::SysUserParms,
+        container::{self}, function_invocations::FunctionInvocations, spec::SysUserParms
     },
 };
 use proto::api::action::{
@@ -25,8 +24,8 @@ pub struct Config {
     pub is_dev: bool,
 }
 
-#[derive(Clone)]
 pub struct NativeWorker {
+    function_invocations: Arc<FunctionInvocations>,
     registry_service: RegistryClient,
     root_path: PathBuf,
     sysuser: SysUserParms,
@@ -34,6 +33,7 @@ pub struct NativeWorker {
 
 impl NativeWorker {
     pub fn new(
+        function_invocations: &Arc<FunctionInvocations>,
         registry_service: RegistryClient,
         root_path: PathBuf,
         syscall: &dyn Syscall,
@@ -41,6 +41,7 @@ impl NativeWorker {
     ) -> Result<Self> {
         info!(is_dev = server_config.is_dev, "Creating NativeWorker");
         Ok(Self {
+            function_invocations: function_invocations.clone(),
             registry_service,
             root_path,
             sysuser: SysUserParms {
@@ -53,7 +54,7 @@ impl NativeWorker {
 
 impl NativeWorker {
     #[instrument(name = "function_execute", level = "debug", skip(self, body), fields(digest = %digest, body_size = body.len()))]
-    pub async fn execute(&self, digest: String, body: String) -> Result<String> {
+    pub async fn execute(&mut self, digest: String, body: String) -> Result<String> {
         debug!("Executing function");
 
         let uri = self.get_available_handler_uri(digest.clone()).await?;
@@ -81,37 +82,36 @@ impl NativeWorker {
         Ok(resp.output)
     }
 
-    pub async fn clean_all_handlers(&self) -> Result<()> {
-        let containers = ProccesContainer::get_all(&self.root_path).await?;
-        for mut container in containers {
-            container.cleanup().await?;
-        }
-        Ok(())
-    }
 
-    async fn get_available_handler_uri(&self, digest: String) -> Result<Url> {
+    async fn get_available_handler_uri(&mut self, digest: String) -> Result<Url> {
         // TODO: This is a workaround i don't like as there could be a very low way that this
         // fails. 
         let short_digest = &digest[..16];
 
-        let proc = if ProccesContainer::exist(&self.root_path, short_digest) {
-            info!(short_digest = %short_digest, "Loading existing handler");
-            ProccesContainer::load(&self.root_path, short_digest).await?
+        let url = if let Some(invocation) = self.function_invocations.get(short_digest).await {
+            info!("Loading existing function");
+            invocation.url.clone()
         } else {
-            info!(short_digest = %short_digest, "Creating new handler");
-            let dir_path = self.registry_service.get_tar_by_digest(&digest).await?;
-            container::ProccesContainer::new(
+            info!("Creating new function");
+            let dir_path = self
+                .registry_service
+                .get_tar_by_digest(&digest)
+                .await?;
+
+            let proc = Arc::new(container::ProccesContainer::new(
                 short_digest,
                 dir_path,
                 self.root_path.clone(),
                 &self.sysuser,
             )
-            .await?
+            .await?);
+
+            let url = proc.get_url()?;
+            self.function_invocations.insert(short_digest.to_string(), url.clone()).await;
+            url
         };
 
-        let url = proc.get_url()?;
         self.wait_for_server_ready(&url).await?;
-
         Ok(url)
     }
 

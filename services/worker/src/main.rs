@@ -6,6 +6,7 @@ mod worker;
 
 use nix::sys::stat::Mode;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -19,6 +20,7 @@ use crate::client::controlplane_client::ControlPlaneClient;
 use crate::client::registry_clint::RegistryClient;
 use crate::config::Environment;
 use crate::server::WorkerServer;
+use crate::worker::function_invocations::FunctionInvocations;
 use crate::worker::organizer::{Config, NativeWorker};
 use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -52,10 +54,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("Starting in Development mode");
     }
 
+    let function_invocations = Arc::new(FunctionInvocations::new(root_path.to_path_buf()));
+
     let registry_clinet = RegistryClient::new(config.registry_clinet);
     let controlplane_client = ControlPlaneClient::new(config.controlplane_clinet);
 
     let function_worker = NativeWorker::new(
+        &function_invocations,
         registry_clinet,
         root_path,
         &*syscall,
@@ -64,11 +69,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     )?;
 
-    let mut background_server = BackgroundJob::new(Duration::from_secs(10));
-    let worker_server = WorkerServer::new(function_worker.clone(), controlplane_client);
+    let mut background_server = BackgroundJob::new(&function_invocations, Duration::from_secs(10));
+    let worker_server = WorkerServer::new(function_worker, controlplane_client);
 
     info!("Worker listening on {}", config.addr);
-    background_server.start();
+    background_server.start().await;
 
     // Graceful shutdown with signal handling
     let server = Server::builder()
@@ -86,7 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     info!("Server shut down gracefully");
     background_server.stop();
-    function_worker.clean_all_handlers().await?;
+    function_invocations.delete_all().await?;
     Ok(())}
 
 fn determine_rootpath(syscall: &dyn libcontainer::syscall::Syscall) -> Result<PathBuf> {

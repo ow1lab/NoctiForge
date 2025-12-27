@@ -1,40 +1,43 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-use anyhow::Result;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::info;
+
+use crate::worker::function_invocations::FunctionInvocations;
 
 pub struct BackgroundJob {
     cancel: CancellationToken,
-    time: Duration
+    time: Duration,
+    function_invocations: Arc<FunctionInvocations>,
 }
 
 impl BackgroundJob {
-    pub fn new(time: Duration) -> Self {
+    pub fn new(
+        function_invocations: &Arc<FunctionInvocations>,
+        time: Duration,
+        ) -> Self {
         return Self {
             cancel: CancellationToken::new(),
-            time
+            time,
+            function_invocations: function_invocations.clone()
         }
     }
 
-    pub fn start(&mut self) {
+    pub async fn start(&mut self) {
         info!("Starting BackgroundJob");
         let cancel = self.cancel.clone();
         let time = self.time;
+        let function = self.function_invocations.clone();
 
         tokio::spawn(async move {
             while !cancel.is_cancelled() {
                 sleep(time).await;
-                if let Err(e) = Self::execute().await {
-                    error!("job error: {}", e)
+                for proc in function.get_all().await.keys() {
+                    info!("Checking id: {}", proc)
                 }
             }
         });
-    }
-
-    async fn execute() -> Result<()> {
-        Ok(())
     }
 
     pub fn stop(&mut self) {

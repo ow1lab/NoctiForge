@@ -1,11 +1,14 @@
+use std::sync::Arc;
+
 use proto::api::worker::{ExecuteRequest, ExecuteResponse, worker_service_server::WorkerService};
+use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, instrument, warn};
 
 use crate::{client::controlplane_client::ControlPlaneClient, worker::organizer::NativeWorker};
 
 pub struct WorkerServer {
-    function_worker: NativeWorker,
+    function_worker: Arc<Mutex<NativeWorker>>,
     controlplane_client: ControlPlaneClient,
 }
 
@@ -13,7 +16,7 @@ impl WorkerServer {
     pub fn new(function_worker: NativeWorker, controlplane_client: ControlPlaneClient) -> Self {
         debug!("Creating WorkerServer");
         Self {
-            function_worker,
+            function_worker: Arc::new(Mutex::new(function_worker)),
             controlplane_client,
         }
     }
@@ -41,20 +44,20 @@ impl WorkerService for WorkerServer {
             })?;
 
         debug!(action = %req.action, digest = %digest, body_size = req.body.len(), "Executing function");
-        let output = self
-            .function_worker
-            .execute(digest, req.body)
-            .await
-            .map_err(|e| {
-                warn!(action = %req.action, error = %e, "Execution failed");
-                Status::internal(format!("Execution failed: {:?}", e))
-            })?;        
+        let output = {
+            let mut worker = self.function_worker.lock().await;
+            worker.execute(digest, req.body).await
+        }
+        .map_err(|e| {
+            warn!(action = %req.action, error = %e, "Execution failed");
+            Status::internal(format!("Execution failed: {:?}", e))
+        })?;
 
         info!(action = %req.action, output_size = output.len(), "Execution completed successfully");
 
         Ok(Response::new(ExecuteResponse {
             status: "Ok".to_string(),
-            resp: output,
+            resp: output.to_string(),
         }))
     }
 }
