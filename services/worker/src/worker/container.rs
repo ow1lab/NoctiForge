@@ -201,10 +201,12 @@ impl ProccesContainer {
         Ok(url)
     }
 
+    #[allow(dead_code)]
     pub fn exist(root_path: &PathBuf, instance_id: &str) -> bool {
         root_path.join(CONTAINER_STATE_FOLDER).join(instance_id).exists()
     }
 
+    #[allow(dead_code)]
     pub async fn get_all(root_path: &PathBuf) -> Result<Vec<Self>> {
         let mut containers: Vec<ProccesContainer> = vec![];
 
