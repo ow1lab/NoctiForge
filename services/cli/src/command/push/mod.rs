@@ -1,19 +1,21 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Context, Result};
 use custom::CustomBuild;
 use proto::api::{
     controlplane::{
-        SetDigestToNameRequest, control_plane_service_client::ControlPlaneServiceClient,
+        control_plane_service_client::ControlPlaneServiceClient, SetDigestToNameRequest,
     },
     registry::{self, RegistryPushRequest},
 };
 use registry::registry_service_client::RegistryServiceClient;
-use rust::RustBuild;
+use rust::{RustBuild};
 use serde::Deserialize;
-use tokio::io::{AsyncReadExt, duplex};
-use tonic::{Request, async_trait};
+use tokio::io::{duplex, AsyncReadExt};
+use tonic::{async_trait, Request};
 use tracing::{debug, error, info};
+
+use crate::command::push::rust::RustBuildConfig;
 
 mod custom;
 mod rust;
@@ -25,18 +27,28 @@ trait BuildService {
     async fn build(&self, project_path: PathBuf, temp_path: PathBuf) -> anyhow::Result<()>;
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct Project {
     name: String,
-    version: String,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct Config {
     project: Project,
     build: Build,
+    #[serde(default = "default_registry_url")]
+    registry_url: String,
+    #[serde(default = "default_control_plane_url")]
+    control_plane_url: String,
+}
+
+fn default_registry_url() -> String {
+    std::env::var("NOCTI_REGISTRY_URL").unwrap_or_else(|_| "http://localhost:50001".to_string())
+}
+
+fn default_control_plane_url() -> String {
+    std::env::var("NOCTI_CONTROL_PLANE_URL")
+        .unwrap_or_else(|_| "http://localhost:50002".to_string())
 }
 
 #[derive(Deserialize, Debug)]
@@ -45,67 +57,84 @@ enum Build {
     #[serde(rename = "custom")]
     Custom(CustomBuild),
     #[serde(rename = "rust")]
-    Rust(RustBuild),
+    Rust(RustBuildConfig),
 }
 
 pub async fn run(path: &str) -> Result<()> {
     let project_path = Path::new(path);
     info!("Running push command on path: {:?}", project_path);
 
-    if !project_path.is_dir() || !project_path.exists() {
+    // Validate project path
+    if !project_path.is_dir() {
         error!("Provided path is invalid: {:?}", project_path);
-        bail!("'path' does not exist or its a not folder");
+        bail!("path does not exist or is not a directory");
     }
 
+    // Validate config file exists
     let config_file_path = project_path.join(CONFIG_FILE);
-    if !config_file_path.is_file() || !config_file_path.exists() {
+    if !config_file_path.is_file() {
         error!("Missing config file at: {:?}", config_file_path);
-        bail!("'{}' does not exist or its a folder", CONFIG_FILE);
+        bail!("'{}' does not exist or is not a file", CONFIG_FILE);
     }
 
+    // Load and parse config
     info!("Loading project config from: {:?}", config_file_path);
-    let config_content = std::fs::read_to_string(config_file_path)?;
-    let config: Config = toml::from_str(&config_content)?;
+    let config_content = std::fs::read_to_string(&config_file_path)
+        .with_context(|| format!("Failed to read config file: {:?}", config_file_path))?;
+
+    let config: Config = toml::from_str(&config_content)
+        .context("Failed to parse config file as TOML")?;
+
     debug!("Parsed config: {:?}", config);
 
-    // Run the scripts
+    // Create build service
     let buildservice: Box<dyn BuildService + Send + Sync> = match config.build {
         Build::Custom(cb) => {
             debug!("Using custom build");
             Box::new(cb)
         }
-        Build::Rust(rb) => {
-            debug!("Using Rust build");
-            Box::new(rb)
+        Build::Rust(rb_config) => {
+            debug!("Using Rust build with config: {:?}", rb_config);
+            Box::new(RustBuild::from(rb_config))
         }
     };
 
-    debug!("Creating a temporary directory");
+    // Create temporary directory for build output
+    debug!("Creating temporary directory for build artifacts");
     let temp_dir = tempfile::Builder::new()
-        .prefix("nocti-build")
-        .tempdir()?;
+        .prefix("nocti-build-")
+        .tempdir()
+        .context("Failed to create temporary directory")?;
 
     let temp_path = temp_dir.path().to_path_buf();
+    debug!("Temporary directory created at: {:?}", temp_path);
 
+    // Run the build
     info!("Starting build...");
-    buildservice.build(project_path.to_path_buf(), temp_path).await?;
-    info!("Build complete");
+    buildservice
+        .build(project_path.to_path_buf(), temp_path.clone())
+        .await
+        .context("Build failed")?;
+    info!("Build completed successfully");
 
+    // Create tar archive and stream it
     let (writer, mut reader) = duplex(8 * 1024);
     info!("Creating in-memory tar archive...");
 
-    tokio::spawn(async move {
+    let tar_task = tokio::spawn(async move {
         let temp_path = temp_dir.path();
 
         let mut builder = tokio_tar::Builder::new(writer);
         if let Err(e) = builder.append_dir_all(".", temp_path).await {
-            error!("tar append_dir_all error: {}", e);
-            return;
+            error!("Failed to add directory to tar: {}", e);
+            return Err(anyhow::anyhow!("tar append_dir_all error: {}", e));
         }
         if let Err(e) = builder.finish().await {
-            error!("tar finish error: {}", e);
+            error!("Failed to finalize tar archive: {}", e);
+            return Err(anyhow::anyhow!("tar finish error: {}", e));
         }
-        debug!("Tarball creation task completed");
+        debug!("Tarball creation completed successfully");
+        Ok(())
     });
 
     // Create a stream of RegistryPushRequest from reader
@@ -125,37 +154,71 @@ pub async fn run(path: &str) -> Result<()> {
                     yield req;
                 }
                 Err(e) => {
-                    error!("Error reading from pipe: {}", e);
+                    error!("Error reading from tar stream: {}", e);
                     break;
                 }
             }
         }
     };
 
-    info!("Connecting to RegistryService...");
-    let mut client = RegistryServiceClient::connect("http://localhost:50001").await?;
+    // Connect to registry and push
+    info!(
+        "Connecting to RegistryService at {}...",
+        config.registry_url
+    );
+    let mut registry_client = RegistryServiceClient::connect(config.registry_url.clone())
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to connect to RegistryService at {}",
+                config.registry_url
+            )
+        })?;
+
     info!("Sending tar data to registry...");
-    let response = client.push(Request::new(outbound)).await?.into_inner();
+    let response = registry_client
+        .push(Request::new(outbound))
+        .await
+        .context("Failed to push to registry")?
+        .into_inner();
+
     debug!("Registry responded with digest: {}", response.digest);
 
+    // Wait for tar task to complete
+    tar_task
+        .await
+        .context("Tar creation task panicked")??;
+
+    // Associate digest with project name
     let key = config.project.name;
     info!("Associating digest with project key: {}", key);
 
-    let mut client = ControlPlaneServiceClient::connect("http://localhost:50002").await?;
+    let mut control_plane_client =
+        ControlPlaneServiceClient::connect(config.control_plane_url.clone())
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to connect to ControlPlaneService at {}",
+                    config.control_plane_url
+                )
+            })?;
+
     let request = SetDigestToNameRequest {
         key: key.clone(),
         digest: response.digest,
     };
 
-    let response = client
+    let response = control_plane_client
         .set_digest_to_name(Request::new(request))
-        .await?
+        .await
+        .context("Failed to set digest to name mapping")?
         .into_inner();
+
     if response.success {
         info!("Successfully set digest for key '{}'", key);
         Ok(())
     } else {
         error!("Failed to associate digest with key '{}'", key);
-        bail!("Something happened when setting digest to key")
+        bail!("Control plane rejected digest to name mapping")
     }
 }

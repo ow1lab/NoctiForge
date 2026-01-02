@@ -9,6 +9,7 @@ members = [
 
 exclude = [
   "examples/echo",
+  "examples/custom",
 ]
 
 resolver = "2"
