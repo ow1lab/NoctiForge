@@ -7,14 +7,12 @@ use super::BuildService;
 
 #[derive(Debug, Deserialize)]
 pub struct RustBuild {
-    output: String,
+    _output: String,
 }
 
 #[async_trait]
 impl BuildService for RustBuild {
-    async fn build(&self, project_path: PathBuf) -> anyhow::Result<String> {
-        _ = self.output;
-        _ = project_path;
+    async fn build(&self, _project_path: PathBuf, _temp_path: PathBuf) -> anyhow::Result<()> {
         todo!()
     }
 }

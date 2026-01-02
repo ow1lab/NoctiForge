@@ -406,6 +406,7 @@ dependencies = [
  "clap",
  "proto",
  "serde",
+ "tempfile",
  "tokio",
  "tokio-tar",
  "tokio-util",

@@ -7,9 +7,5 @@ type = "custom"
 script="""
 set -e
 cargo build --release --target x86_64-unknown-linux-musl
-mkdir -p temp
-rm -rf temp/*
-cp target/x86_64-unknown-linux-musl/release/echo ./temp/bootstrap
+cp target/x86_64-unknown-linux-musl/release/echo $OUTPUT/bootstrap
 """
-output="temp"
-

@@ -9,16 +9,16 @@ use super::BuildService;
 #[derive(Debug, Deserialize)]
 pub struct CustomBuild {
     script: String,
-    output: String,
 }
 
 #[async_trait]
 impl BuildService for CustomBuild {
-    async fn build(&self, project_path: PathBuf) -> anyhow::Result<String> {
+    async fn build(&self, project_path: PathBuf, temp_path: PathBuf) -> anyhow::Result<()> {
         let status = Command::new("sh")
             .arg("-c")
             .arg(&self.script)
             .current_dir(project_path)
+            .env("OUTPUT", temp_path)
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .status()
@@ -28,6 +28,6 @@ impl BuildService for CustomBuild {
             anyhow::bail!("build script failed with exit code: {:?}", status.code());
         }
 
-        Ok(self.output.clone())
+        Ok(())
     }
 }

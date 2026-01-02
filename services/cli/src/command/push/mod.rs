@@ -12,7 +12,6 @@ use registry::registry_service_client::RegistryServiceClient;
 use rust::RustBuild;
 use serde::Deserialize;
 use tokio::io::{AsyncReadExt, duplex};
-use tokio_tar::Builder;
 use tonic::{Request, async_trait};
 use tracing::{debug, error, info};
 
@@ -23,7 +22,7 @@ const CONFIG_FILE: &str = "Nocti.toml";
 
 #[async_trait]
 trait BuildService {
-    async fn build(&self, project_path: PathBuf) -> Result<String>;
+    async fn build(&self, project_path: PathBuf, temp_path: PathBuf) -> anyhow::Result<()>;
 }
 
 #[allow(dead_code)]
@@ -81,17 +80,25 @@ pub async fn run(path: &str) -> Result<()> {
         }
     };
 
+    debug!("Creating a temporary directory");
+    let temp_dir = tempfile::Builder::new()
+        .prefix("nocti-build")
+        .tempdir()?;
+
+    let temp_path = temp_dir.path().to_path_buf();
+
     info!("Starting build...");
-    let path = buildservice.build(project_path.to_path_buf()).await?;
-    let bin_folder = project_path.join(path);
-    info!("Build complete. Output folder: {:?}", bin_folder);
+    buildservice.build(project_path.to_path_buf(), temp_path).await?;
+    info!("Build complete");
 
     let (writer, mut reader) = duplex(8 * 1024);
     info!("Creating in-memory tar archive...");
 
     tokio::spawn(async move {
-        let mut builder = Builder::new(writer);
-        if let Err(e) = builder.append_dir_all(".", bin_folder).await {
+        let temp_path = temp_dir.path();
+
+        let mut builder = tokio_tar::Builder::new(writer);
+        if let Err(e) = builder.append_dir_all(".", temp_path).await {
             error!("tar append_dir_all error: {}", e);
             return;
         }
