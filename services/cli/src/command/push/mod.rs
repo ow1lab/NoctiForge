@@ -1,18 +1,18 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use custom::CustomBuild;
 use proto::api::{
     controlplane::{
-        control_plane_service_client::ControlPlaneServiceClient, SetDigestToNameRequest,
+        SetDigestToNameRequest, control_plane_service_client::ControlPlaneServiceClient,
     },
     registry::{self, RegistryPushRequest},
 };
 use registry::registry_service_client::RegistryServiceClient;
-use rust::{RustBuild};
+use rust::RustBuild;
 use serde::Deserialize;
-use tokio::io::{duplex, AsyncReadExt};
-use tonic::{async_trait, Request};
+use tokio::io::{AsyncReadExt, duplex};
+use tonic::{Request, async_trait};
 use tracing::{debug, error, info};
 
 use crate::command::push::rust::RustBuildConfig;
@@ -82,8 +82,8 @@ pub async fn run(path: &str) -> Result<()> {
     let config_content = std::fs::read_to_string(&config_file_path)
         .with_context(|| format!("Failed to read config file: {:?}", config_file_path))?;
 
-    let config: Config = toml::from_str(&config_content)
-        .context("Failed to parse config file as TOML")?;
+    let config: Config =
+        toml::from_str(&config_content).context("Failed to parse config file as TOML")?;
 
     debug!("Parsed config: {:?}", config);
 
@@ -185,9 +185,7 @@ pub async fn run(path: &str) -> Result<()> {
     debug!("Registry responded with digest: {}", response.digest);
 
     // Wait for tar task to complete
-    tar_task
-        .await
-        .context("Tar creation task panicked")??;
+    tar_task.await.context("Tar creation task panicked")??;
 
     // Associate digest with project name
     let key = config.project.name;
