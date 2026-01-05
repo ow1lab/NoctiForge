@@ -1,16 +1,10 @@
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use proto::api::action::{
-    InvokeRequest, 
-    InvokeResult,
-    Success,
-    Failure,
-    ErrorCode,
-    function_runner_service_server::{
-        FunctionRunnerService,
-        FunctionRunnerServiceServer},
-    invoke_result::Result as IR
+    ErrorCode, Failure, InvokeRequest, InvokeResult, Success,
+    function_runner_service_server::{FunctionRunnerService, FunctionRunnerServiceServer},
+    invoke_result::Result as IR,
 };
 use serde::{Serialize, de::DeserializeOwned};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::{future::Future, marker::PhantomData};
 use tokio::net::UnixListener;
 use tonic::Response;
@@ -52,43 +46,35 @@ where
             &self,
             request: tonic::Request<InvokeRequest>,
         ) -> Result<Response<InvokeResult>, Status> {
-            let inner =  request.into_inner();           
+            let inner = request.into_inner();
 
             let input: In = serde_json::from_slice(&inner.payload)
                 .map_err(|e| Status::invalid_argument(format!("Invalid input: {}", e)))?;
 
             // Call the handler safely, catching panics
-           let handler_result = catch_unwind(AssertUnwindSafe({
+            let handler_result = catch_unwind(AssertUnwindSafe({
                 let handler = self.handler.clone();
                 move || handler(input)
             }));
 
             let invoke_result = match handler_result {
-                Ok(fut) => {
-                    match fut.await {
-                        Ok(out) => {
-                            match serde_json::to_vec(&out) {
-                                Ok(bytes) => IR::Success(Success { output: bytes }),
-                                Err(e) => IR::Failure(Failure {
-                                    code: ErrorCode::FunctionError as i32,
-                                    message: format!("Serialization failed: {}", e),
-                                }),
-                            }
-                        }
-                        Err(e) => {
-                            IR::Failure(Failure {
-                                code: ErrorCode::FunctionError as i32,
-                                message: e.to_string(),
-                            })
-                        }
-                    }
-                }
-                Err(_) => {
-                    IR::Failure(Failure {
-                        code: ErrorCode::FunctionPanic as i32,
-                        message: "Handler panicked".to_string(),
-                    })
-                }
+                Ok(fut) => match fut.await {
+                    Ok(out) => match serde_json::to_vec(&out) {
+                        Ok(bytes) => IR::Success(Success { output: bytes }),
+                        Err(e) => IR::Failure(Failure {
+                            code: ErrorCode::FunctionError as i32,
+                            message: format!("Serialization failed: {}", e),
+                        }),
+                    },
+                    Err(e) => IR::Failure(Failure {
+                        code: ErrorCode::FunctionError as i32,
+                        message: e.to_string(),
+                    }),
+                },
+                Err(_) => IR::Failure(Failure {
+                    code: ErrorCode::FunctionPanic as i32,
+                    message: "Handler panicked".to_string(),
+                }),
             };
 
             Ok(Response::new(InvokeResult {

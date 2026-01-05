@@ -7,8 +7,8 @@ use tonic::Request;
 use tracing::{debug, info, instrument, warn};
 use url::Url;
 
-use proto::api::action::invoke_result::Result::Success;
 use proto::api::action::invoke_result::Result::Failure;
+use proto::api::action::invoke_result::Result::Success;
 
 use crate::{
     client::registry_clint::RegistryClient,
@@ -75,7 +75,7 @@ impl NativeWorker {
         let resp = client
             .invoke(Request::new(InvokeRequest {
                 payload: body.into_bytes(),
-                metadata: HashMap::new() 
+                metadata: HashMap::new(),
             }))
             .await
             .map_err(|e| {
