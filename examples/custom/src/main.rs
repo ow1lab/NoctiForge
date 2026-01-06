@@ -1,11 +1,11 @@
-use sdk::Problem;
+use sdk::{Context, Problem};
 
 #[derive(serde::Deserialize)]
 struct Request {
     name: String,
 }
 
-async fn handler(req: Request) -> Result<String, Problem> {
+async fn handler(req: Request, _: Context) -> Result<String, Problem> {
     Ok(format!("Hello, {}!", req.name))
 }
 

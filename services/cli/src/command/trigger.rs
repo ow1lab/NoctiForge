@@ -5,7 +5,7 @@ use proto::api::worker::worker_service_client::WorkerServiceClient;
 use proto::api::worker::{ExecuteRequest, execute_response};
 use tracing::{debug, error, info};
 
-pub async fn run(key: String, body: String) -> Result<()> {
+pub async fn run(key: String, body: String, metadata: Vec<String>) -> Result<()> {
     info!("Triggering action: '{}'", key);
     debug!("Request body: {}", body);
 
@@ -21,10 +21,19 @@ pub async fn run(key: String, body: String) -> Result<()> {
         }
     };
 
+    let metahash = metadata
+        .into_iter()
+        .map(|meta| {
+            meta.split_once('=')
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .ok_or_else(|| anyhow::format_err!("Invalid metadata entry: {}", meta))
+        })
+        .collect::<Result<HashMap<_, _>, _>>();
+
     let request = tonic::Request::new(ExecuteRequest {
         action: key.clone(),
         body: body.into(),
-        metadata: HashMap::new(),
+        metadata: metahash?,
     });
 
     info!("Sending ExecuteRequest to worker");
