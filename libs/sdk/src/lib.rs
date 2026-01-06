@@ -4,7 +4,10 @@ use proto::api::action::{
     invoke_result::Result as IR,
 };
 use serde::{Serialize, de::DeserializeOwned};
-use std::{collections::HashMap, panic::{AssertUnwindSafe, catch_unwind}};
+use std::{
+    collections::HashMap,
+    panic::{AssertUnwindSafe, catch_unwind},
+};
 use std::{future::Future, marker::PhantomData};
 use tokio::net::UnixListener;
 use tonic::Response;
@@ -15,7 +18,7 @@ pub use proto::api::action::Problem;
 
 #[allow(dead_code)]
 pub struct Context {
-    pub values: HashMap<String, String>
+    pub values: HashMap<String, String>,
 }
 
 pub async fn start<F, Fut, In, Out>(handler: F) -> Result<(), Box<dyn std::error::Error>>
@@ -59,7 +62,7 @@ where
                 .map_err(|e| Status::invalid_argument(format!("Invalid input: {}", e)))?;
 
             let context = Context {
-                values: inner.metadata
+                values: inner.metadata,
             };
 
             // Call the handler safely, catching panics

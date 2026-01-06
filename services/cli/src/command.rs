@@ -23,7 +23,9 @@ pub enum Command {
         #[arg(value_name = "KEY=VALUE", trailing_var_arg = true)]
         metadata: Vec<String>,
     },
-    Push { path: String },
+    Push {
+        path: String,
+    },
 }
 
 #[derive(Parser, Debug)]
@@ -38,7 +40,11 @@ pub async fn run() -> Result<()> {
     setup_tracing(cli.verbose)?;
 
     match cli.command {
-        Command::Trigger { action, payload, metadata } => trigger::run(action, payload, metadata).await?,
+        Command::Trigger {
+            action,
+            payload,
+            metadata,
+        } => trigger::run(action, payload, metadata).await?,
         Command::Push { path } => {
             push::run(&path).await?;
         }
