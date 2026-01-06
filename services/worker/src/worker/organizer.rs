@@ -80,7 +80,7 @@ impl NativeWorker {
         let resp = client
             .invoke(Request::new(InvokeRequest {
                 payload: body,
-                metadata: metadata,
+                metadata,
             }))
             .await
             .map_err(|e| {
