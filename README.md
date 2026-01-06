@@ -20,6 +20,8 @@ NoctiForge is build with the developer in mind. so to make it easy to develop i 
 Ensure you have the following installed:
 - Cargo (Version 1.86.0)
 
+| If you are using Nix, the dependencies will be installed automatically. 
+
 Initialize the required folders and files:
 ```sh
 ./scripts/setup.sh
