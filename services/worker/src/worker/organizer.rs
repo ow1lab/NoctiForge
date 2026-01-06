@@ -87,16 +87,17 @@ impl NativeWorker {
         debug!(digest = %digest, "Function execution completed");
         if let Some(r) = resp.result {
             let outcome = match r {
-                proto::api::action::invoke_result::Result::Success(e) => Outcome::Success(ExecuteSuccess {
-                    body: e.output
-                }),
-                proto::api::action::invoke_result::Result::Problem(p) => Outcome::Problem(proto::api::worker::ProblemDetails {
-                    r#type: p.r#type,
-                    detail: p.detail,
-                    instance: "urn::invoke::abc1234".to_string(),
-                    extensions: HashMap::new(),
-
-                }),
+                proto::api::action::invoke_result::Result::Success(e) => {
+                    Outcome::Success(ExecuteSuccess { body: e.output })
+                }
+                proto::api::action::invoke_result::Result::Problem(p) => {
+                    Outcome::Problem(proto::api::worker::ProblemDetails {
+                        r#type: p.r#type,
+                        detail: p.detail,
+                        instance: "urn::invoke::abc1234".to_string(),
+                        extensions: HashMap::new(),
+                    })
+                }
             };
             return Ok(proto::api::worker::ExecuteResponse {
                 outcome: Some(outcome),

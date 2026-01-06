@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use proto::api::worker::{ExecuteRequest, execute_response};
 use proto::api::worker::worker_service_client::WorkerServiceClient;
+use proto::api::worker::{ExecuteRequest, execute_response};
 use tracing::{debug, error, info};
 
 pub async fn run(key: String, body: String) -> Result<()> {

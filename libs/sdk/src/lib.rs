@@ -1,5 +1,7 @@
 use proto::api::action::{
-    InvokeRequest, InvokeResult, Success, function_runner_service_server::{FunctionRunnerService, FunctionRunnerServiceServer}, invoke_result::Result as IR
+    InvokeRequest, InvokeResult, Success,
+    function_runner_service_server::{FunctionRunnerService, FunctionRunnerServiceServer},
+    invoke_result::Result as IR,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use std::panic::{AssertUnwindSafe, catch_unwind};
