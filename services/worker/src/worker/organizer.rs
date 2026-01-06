@@ -59,7 +59,12 @@ impl NativeWorker {
 
 impl NativeWorker {
     #[instrument(name = "function_execute", level = "debug", skip(self, body), fields(digest = %digest, body_size = body.len()))]
-    pub async fn execute(&mut self, digest: String, body: Vec<u8>) -> Result<ExecuteResponse> {
+    pub async fn execute(
+        &mut self,
+        digest: String,
+        body: Vec<u8>,
+        metadata: HashMap<String, String>,
+    ) -> Result<ExecuteResponse> {
         debug!("Executing function");
 
         let uri = self.get_available_handler_uri(digest.clone()).await?;
@@ -75,7 +80,7 @@ impl NativeWorker {
         let resp = client
             .invoke(Request::new(InvokeRequest {
                 payload: body,
-                metadata: HashMap::new(),
+                metadata,
             }))
             .await
             .map_err(|e| {

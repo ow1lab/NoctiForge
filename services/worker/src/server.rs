@@ -46,7 +46,7 @@ impl WorkerService for WorkerServer {
         debug!(action = %req.action, digest = %digest, body_size = req.body.len(), "Executing function");
         let output = {
             let mut worker = self.function_worker.lock().await;
-            worker.execute(digest, req.body).await
+            worker.execute(digest, req.body, req.metadata).await
         }
         .map_err(|e| {
             warn!(action = %req.action, error = %e, "Execution failed");

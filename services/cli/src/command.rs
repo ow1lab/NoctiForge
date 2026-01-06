@@ -17,8 +17,15 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    Trigger { action: String, payload: String },
-    Push { path: String },
+    Trigger {
+        action: String,
+        payload: String,
+        #[arg(value_name = "KEY=VALUE", trailing_var_arg = true)]
+        metadata: Vec<String>,
+    },
+    Push {
+        path: String,
+    },
 }
 
 #[derive(Parser, Debug)]
@@ -33,7 +40,11 @@ pub async fn run() -> Result<()> {
     setup_tracing(cli.verbose)?;
 
     match cli.command {
-        Command::Trigger { action, payload } => trigger::run(action, payload).await?,
+        Command::Trigger {
+            action,
+            payload,
+            metadata,
+        } => trigger::run(action, payload, metadata).await?,
         Command::Push { path } => {
             push::run(&path).await?;
         }
