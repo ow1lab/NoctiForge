@@ -1,0 +1,15 @@
+[package]
+name = "runtime-wasm"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1.92"
+runtime = { path = "../runtime" }
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["full"] }
+wasmtime = "50.0.2"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+wat = "1.263.0"

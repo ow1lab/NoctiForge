@@ -1,3 +1,3 @@
 [workspace]
-members = ["create/runtime"]
+members = ["create/runtime", "create/runtime-wasm"]
 resolver = "3"
