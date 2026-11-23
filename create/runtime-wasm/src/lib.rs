@@ -7,16 +7,9 @@ const MEMORY_EXPORT: &str = "memory";
 const STATUS_SUCCESS: i32 = 0;
 const STATUS_PROBLEM: i32 = 1;
 
+#[derive(Default)]
 pub struct WasmEngine {
     engine: Engine,
-}
-
-impl WasmEngine {
-    pub fn new() -> Self {
-        Self {
-            engine: Engine::default(),
-        }
-    }
 }
 
 pub struct WasmInstance {
@@ -132,7 +125,7 @@ mod tests {
         .unwrap();
         std::fs::write(&path, wasm).unwrap();
 
-        let engine = WasmEngine::new();
+        let engine = WasmEngine::default();
 
         let mut instance = engine
             .start(RuntimeConfig {
@@ -171,7 +164,7 @@ mod tests {
         .unwrap();
         std::fs::write(&path, wasm).unwrap();
 
-        let engine = WasmEngine::new();
+        let engine = WasmEngine::default();
         let mut instance = engine
             .start(RuntimeConfig {
                 artifact: path.into_string().unwrap(),
@@ -192,7 +185,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test.wasm");
         std::fs::write(&path, wat::parse_str(source).unwrap()).unwrap();
-        let engine = WasmEngine::new();
+        let engine = WasmEngine::default();
         let mut instance = engine
             .start(RuntimeConfig {
                 artifact: path.into_string().unwrap(),
