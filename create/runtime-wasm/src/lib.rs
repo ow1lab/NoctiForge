@@ -206,6 +206,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn invoke_returns_binary_output() {
+        let result = invoke_wat(
+            r#"(module
+                (memory (export "memory") 1)
+                (data (i32.const 0) "\00\ff\80")
+                (func (export "run") (result i32 i32 i32 i32 i32)
+                    i32.const 0 i32.const 0 i32.const 3 i32.const 0 i32.const 0)
+            )"#,
+        )
+        .await
+        .unwrap();
+
+        match result {
+            InvokeResult::Success { output } => assert_eq!(output, [0x00, 0xff, 0x80]),
+            InvokeResult::Problem { .. } => panic!("expected success"),
+        }
+    }
+
+    #[tokio::test]
     async fn test_unknown_guest_status() {
         let result = invoke_wat(
             r#"(module
