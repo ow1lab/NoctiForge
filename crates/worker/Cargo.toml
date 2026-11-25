@@ -10,6 +10,7 @@ tokio = { version = "1.54", features = ["sync"] }
 
 [dev-dependencies]
 async-trait = "0.1"
+tokio = { version = "1.54", features = ["macros", "rt"] }
 
 [lints]
 workspace = true
