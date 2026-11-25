@@ -3,7 +3,7 @@ mod key;
 
 use color_eyre::Result;
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 use runtime::{Instance, RuntimeConfig, RuntimeError};
 use tokio::sync::{Mutex, Semaphore};
@@ -40,6 +40,24 @@ impl WorkerPool {
         })?;
 
         runtime.start(config).await
+    }
+
+    async fn release(&self, key: PoolKey, instance: Box<dyn Instance>) -> Result<(), RuntimeError> {
+        let mut idle = self.idle.lock().await;
+
+        let count: usize = idle.values().map(Vec::len).sum();
+
+        if count < self.config.max_idle_instances {
+            idle.entry(key).or_default().push(IdleInstance {
+                instance,
+                last_used: Instant::now(),
+            });
+
+            return Ok(());
+        }
+
+        drop(idle);
+        instance.stop().await
     }
 }
 
@@ -78,6 +96,26 @@ mod tests {
         }
 
         async fn stop(self: Box<Self>) -> Result<(), RuntimeError> {
+            Ok(())
+        }
+    }
+
+    struct StoppableInstance {
+        stops: Arc<AtomicUsize>,
+        fail: bool,
+    }
+
+    #[async_trait]
+    impl Instance for StoppableInstance {
+        async fn invoke(&mut self, _payload: &[u8]) -> Result<InvokeResult, RuntimeError> {
+            Ok(InvokeResult::Success { output: Vec::new() })
+        }
+
+        async fn stop(self: Box<Self>) -> Result<(), RuntimeError> {
+            self.stops.fetch_add(1, Ordering::SeqCst);
+            if self.fail {
+                return Err(RuntimeError::Stop("test stop failure".to_owned()));
+            }
             Ok(())
         }
     }
@@ -253,5 +291,111 @@ mod tests {
 
         assert!(matches!(result, Err(RuntimeError::Start(message)) if message == "test failure"));
         assert_eq!(starts.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn release_caches_instance_with_current_timestamp_below_limit() {
+        let pool = pool(RuntimeRegistry::default());
+        let stops = Arc::new(AtomicUsize::new(0));
+        let before = Instant::now();
+
+        let result = pool
+            .release(
+                key("module-a"),
+                Box::new(StoppableInstance {
+                    stops: Arc::clone(&stops),
+                    fail: false,
+                }),
+            )
+            .await;
+        let after = Instant::now();
+
+        assert!(result.is_ok());
+        assert_eq!(stops.load(Ordering::SeqCst), 0);
+        let idle = pool.idle.lock().await;
+        let cached_recent = idle
+            .get(&key("module-a"))
+            .and_then(|instances| instances.first())
+            .is_some_and(|instance| instance.last_used >= before && instance.last_used <= after);
+        drop(idle);
+        assert!(cached_recent);
+    }
+
+    #[tokio::test]
+    async fn release_stops_instance_when_global_idle_limit_is_reached() {
+        let mut pool = pool(RuntimeRegistry::default());
+        pool.config.max_idle_instances = 1;
+        let stops = Arc::new(AtomicUsize::new(0));
+
+        let first = pool
+            .release(
+                key("module-a"),
+                Box::new(StoppableInstance {
+                    stops: Arc::clone(&stops),
+                    fail: false,
+                }),
+            )
+            .await;
+        let second = pool
+            .release(
+                key("module-b"),
+                Box::new(StoppableInstance {
+                    stops: Arc::clone(&stops),
+                    fail: false,
+                }),
+            )
+            .await;
+
+        assert!(first.is_ok());
+        assert!(second.is_ok());
+        assert_eq!(stops.load(Ordering::SeqCst), 1);
+        let idle = pool.idle.lock().await;
+        assert_eq!(idle.get(&key("module-a")).map(Vec::len), Some(1));
+        assert!(idle.get(&key("module-b")).is_none());
+        drop(idle);
+    }
+
+    #[tokio::test]
+    async fn release_stops_instance_when_idle_limit_is_zero() {
+        let mut pool = pool(RuntimeRegistry::default());
+        pool.config.max_idle_instances = 0;
+        let stops = Arc::new(AtomicUsize::new(0));
+
+        let result = pool
+            .release(
+                key("module-a"),
+                Box::new(StoppableInstance {
+                    stops: Arc::clone(&stops),
+                    fail: false,
+                }),
+            )
+            .await;
+
+        assert!(result.is_ok());
+        assert_eq!(stops.load(Ordering::SeqCst), 1);
+        assert!(pool.idle.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn release_propagates_stop_failure_when_full() {
+        let mut pool = pool(RuntimeRegistry::default());
+        pool.config.max_idle_instances = 0;
+        let stops = Arc::new(AtomicUsize::new(0));
+
+        let result = pool
+            .release(
+                key("module-a"),
+                Box::new(StoppableInstance {
+                    stops: Arc::clone(&stops),
+                    fail: true,
+                }),
+            )
+            .await;
+
+        assert!(
+            matches!(result, Err(RuntimeError::Stop(message)) if message == "test stop failure")
+        );
+        assert_eq!(stops.load(Ordering::SeqCst), 1);
+        assert!(pool.idle.lock().await.is_empty());
     }
 }
