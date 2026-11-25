@@ -1,9 +1,11 @@
+mod cleanup;
 mod instance;
 mod key;
 
 use color_eyre::Result;
 
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::HashMap, sync::Arc};
+use tokio::time::Instant;
 
 use runtime::{Instance, RuntimeConfig, RuntimeError, runtime::InvokeResult};
 use tokio::sync::{Mutex, Semaphore};
@@ -105,12 +107,14 @@ mod tests {
             Arc,
             atomic::{AtomicUsize, Ordering},
         },
-        time::Instant,
     };
 
     use async_trait::async_trait;
     use runtime::{Instance, Runtime, RuntimeConfig, RuntimeError, runtime::InvokeResult};
-    use tokio::sync::{Mutex, Semaphore};
+    use tokio::{
+        sync::{Mutex, Semaphore},
+        time::Instant,
+    };
 
     use crate::{
         config::PoolConfig,
