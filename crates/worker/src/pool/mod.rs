@@ -5,7 +5,7 @@ use color_eyre::Result;
 
 use std::{collections::HashMap, sync::Arc, time::Instant};
 
-use runtime::{Instance, RuntimeConfig, RuntimeError};
+use runtime::{Instance, RuntimeConfig, RuntimeError, runtime::InvokeResult};
 use tokio::sync::{Mutex, Semaphore};
 
 use crate::{config::PoolConfig, registry::RuntimeRegistry};
@@ -21,6 +21,42 @@ pub struct WorkerPool {
 }
 
 impl WorkerPool {
+    /// Invokes an instance for the given pool key.
+    ///
+    /// # Errors
+    /// Returns an error if acquiring or invoking the instance fails.
+    pub async fn invoke(
+        &self,
+        key: PoolKey,
+        config: RuntimeConfig,
+        payload: &[u8],
+    ) -> Result<InvokeResult, RuntimeError> {
+        let _permit = self
+            .semaphore
+            .acquire()
+            .await
+            .map_err(|e| RuntimeError::Execution(e.to_string()))?;
+
+        let mut instance = self.acquire(&key, config).await?;
+
+        match instance.invoke(payload).await {
+            Ok(result) => {
+                if let Err(error) = self.release(key, instance).await {
+                    tracing::warn!(%error, "Failed to release instance");
+                }
+
+                Ok(result)
+            }
+            Err(error) => {
+                if let Err(stop_error) = instance.stop().await {
+                    tracing::warn!(%stop_error, "Failed to stop instance");
+                }
+
+                Err(error)
+            }
+        }
+    }
+
     async fn acquire(
         &self,
         key: &PoolKey,
@@ -118,6 +154,57 @@ mod tests {
             }
             Ok(())
         }
+    }
+
+    struct InvokingInstance {
+        payloads: Arc<Mutex<Vec<Vec<u8>>>>,
+        stops: Arc<AtomicUsize>,
+        fail_invoke: bool,
+        problem: bool,
+        fail_stop: bool,
+    }
+
+    #[async_trait]
+    impl Instance for InvokingInstance {
+        async fn invoke(&mut self, payload: &[u8]) -> Result<InvokeResult, RuntimeError> {
+            self.payloads.lock().await.push(payload.to_vec());
+            if self.fail_invoke {
+                return Err(RuntimeError::Execution("invoke failed".to_owned()));
+            }
+            if self.problem {
+                return Ok(InvokeResult::Problem {
+                    r#type: "test problem".to_owned(),
+                    details: "details".to_owned(),
+                });
+            }
+            Ok(InvokeResult::Success {
+                output: payload.to_vec(),
+            })
+        }
+
+        async fn stop(self: Box<Self>) -> Result<(), RuntimeError> {
+            self.stops.fetch_add(1, Ordering::SeqCst);
+            if self.fail_stop {
+                return Err(RuntimeError::Stop("stop failed".to_owned()));
+            }
+            Ok(())
+        }
+    }
+
+    fn invoking_instance(
+        payloads: &Arc<Mutex<Vec<Vec<u8>>>>,
+        stops: &Arc<AtomicUsize>,
+        fail_invoke: bool,
+        problem: bool,
+        fail_stop: bool,
+    ) -> Box<dyn Instance> {
+        Box::new(InvokingInstance {
+            payloads: Arc::clone(payloads),
+            stops: Arc::clone(stops),
+            fail_invoke,
+            problem,
+            fail_stop,
+        })
     }
 
     struct TestRuntime {
@@ -291,6 +378,205 @@ mod tests {
 
         assert!(matches!(result, Err(RuntimeError::Start(message)) if message == "test failure"));
         assert_eq!(starts.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn invoke_starts_instance_and_caches_it_after_success() {
+        let (registry, starts, _) = registry(false);
+        let pool = pool(registry);
+
+        let result = pool
+            .invoke(
+                key("module-a"),
+                RuntimeConfig {
+                    artifact: "module-a".to_owned(),
+                },
+                b"input",
+            )
+            .await;
+
+        assert!(matches!(result, Ok(InvokeResult::Success { output }) if output == b"module-a"));
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            pool.idle.lock().await.get(&key("module-a")).map(Vec::len),
+            Some(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn invoke_passes_payload_to_idle_instance_and_releases_it() {
+        let pool = pool(RuntimeRegistry::default());
+        let payloads = Arc::new(Mutex::new(Vec::new()));
+        let stops = Arc::new(AtomicUsize::new(0));
+        pool.idle.lock().await.insert(
+            key("module-a"),
+            vec![IdleInstance {
+                instance: invoking_instance(&payloads, &stops, false, false, false),
+                last_used: Instant::now(),
+            }],
+        );
+
+        let result = pool
+            .invoke(
+                key("module-a"),
+                RuntimeConfig {
+                    artifact: "module-a".to_owned(),
+                },
+                b"request",
+            )
+            .await;
+
+        assert!(matches!(result, Ok(InvokeResult::Success { output }) if output == b"request"));
+        assert_eq!(*payloads.lock().await, vec![b"request".to_vec()]);
+        assert_eq!(stops.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            pool.idle.lock().await.get(&key("module-a")).map(Vec::len),
+            Some(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn invoke_problem_result_is_released_as_successful_invocation() {
+        let pool = pool(RuntimeRegistry::default());
+        let payloads = Arc::new(Mutex::new(Vec::new()));
+        let stops = Arc::new(AtomicUsize::new(0));
+        pool.idle.lock().await.insert(
+            key("module-a"),
+            vec![IdleInstance {
+                instance: invoking_instance(&payloads, &stops, false, true, false),
+                last_used: Instant::now(),
+            }],
+        );
+
+        let result = pool
+            .invoke(
+                key("module-a"),
+                RuntimeConfig {
+                    artifact: "module-a".to_owned(),
+                },
+                b"request",
+            )
+            .await;
+
+        assert!(
+            matches!(result, Ok(InvokeResult::Problem { r#type, details }) if r#type == "test problem" && details == "details")
+        );
+        assert_eq!(stops.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            pool.idle.lock().await.get(&key("module-a")).map(Vec::len),
+            Some(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn invoke_failure_stops_instance_and_returns_original_error() {
+        let pool = pool(RuntimeRegistry::default());
+        let payloads = Arc::new(Mutex::new(Vec::new()));
+        let stops = Arc::new(AtomicUsize::new(0));
+        pool.idle.lock().await.insert(
+            key("module-a"),
+            vec![IdleInstance {
+                instance: invoking_instance(&payloads, &stops, true, false, true),
+                last_used: Instant::now(),
+            }],
+        );
+
+        let result = pool
+            .invoke(
+                key("module-a"),
+                RuntimeConfig {
+                    artifact: "module-a".to_owned(),
+                },
+                b"request",
+            )
+            .await;
+
+        assert!(
+            matches!(result, Err(RuntimeError::Execution(message)) if message == "invoke failed")
+        );
+        assert_eq!(stops.load(Ordering::SeqCst), 1);
+        assert!(
+            pool.idle
+                .lock()
+                .await
+                .get(&key("module-a"))
+                .is_some_and(Vec::is_empty)
+        );
+    }
+
+    #[tokio::test]
+    async fn invoke_returns_result_even_if_releasing_instance_fails() {
+        let mut pool = pool(RuntimeRegistry::default());
+        pool.config.max_idle_instances = 0;
+        let payloads = Arc::new(Mutex::new(Vec::new()));
+        let stops = Arc::new(AtomicUsize::new(0));
+        pool.idle.lock().await.insert(
+            key("module-a"),
+            vec![IdleInstance {
+                instance: invoking_instance(&payloads, &stops, false, false, true),
+                last_used: Instant::now(),
+            }],
+        );
+
+        let result = pool
+            .invoke(
+                key("module-a"),
+                RuntimeConfig {
+                    artifact: "module-a".to_owned(),
+                },
+                b"request",
+            )
+            .await;
+
+        assert!(matches!(result, Ok(InvokeResult::Success { output }) if output == b"request"));
+        assert_eq!(stops.load(Ordering::SeqCst), 1);
+        assert!(
+            pool.idle
+                .lock()
+                .await
+                .get(&key("module-a"))
+                .is_some_and(Vec::is_empty)
+        );
+    }
+
+    #[tokio::test]
+    async fn invoke_propagates_acquire_failure() {
+        let pool = pool(RuntimeRegistry::default());
+
+        let result = pool
+            .invoke(
+                key("module-a"),
+                RuntimeConfig {
+                    artifact: "module-a".to_owned(),
+                },
+                b"request",
+            )
+            .await;
+
+        assert!(
+            matches!(result, Err(RuntimeError::Start(message)) if message.contains("Unsupported runtime"))
+        );
+        assert!(pool.idle.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn invoke_returns_execution_error_when_semaphore_is_closed() {
+        let (registry, starts, _) = registry(false);
+        let pool = pool(registry);
+        pool.semaphore.close();
+
+        let result = pool
+            .invoke(
+                key("module-a"),
+                RuntimeConfig {
+                    artifact: "module-a".to_owned(),
+                },
+                b"request",
+            )
+            .await;
+
+        assert!(matches!(result, Err(RuntimeError::Execution(_))));
+        assert_eq!(starts.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
