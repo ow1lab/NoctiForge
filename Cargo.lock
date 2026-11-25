@@ -1952,6 +1952,7 @@ dependencies = [
  "async-trait",
  "color-eyre",
  "runtime",
+ "tokio",
 ]
 
 [[package]]

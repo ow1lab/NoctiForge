@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 color-eyre = "0.6"
 runtime = { path = "../../runtime/runtime/" }
+tokio = { version = "1.54", features = ["sync"] }
 
 [dev-dependencies]
 async-trait = "0.1"
